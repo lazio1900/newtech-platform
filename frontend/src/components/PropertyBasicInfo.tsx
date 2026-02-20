@@ -17,23 +17,23 @@ export default function PropertyBasicInfo({ data }: PropertyBasicInfoProps) {
         </div>
         <div className="info-row">
           <span className="label">세대수:</span>
-          <span className="value">{data.units}세대</span>
+          <span className="value">{data.units != null ? `${data.units.toLocaleString()}세대` : "N/A"}</span>
         </div>
         <div className="info-row">
           <span className="label">복도타입:</span>
-          <span className="value">{data.corridor_type}</span>
+          <span className="value">{data.corridor_type ?? "N/A"}</span>
         </div>
         <div className="info-row">
           <span className="label">연식:</span>
-          <span className="value">약 {data.age}년</span>
+          <span className="value">{data.age != null ? `약 ${data.age}년` : "N/A"}</span>
         </div>
         <div className="info-row">
           <span className="label">전용면적:</span>
-          <span className="value">{data.area}평</span>
+          <span className="value">{data.area != null ? `${data.area}평` : "N/A"}</span>
         </div>
         <div className="info-row">
           <span className="label">입지점수:</span>
-          <span className="value">{data.location_score}/100</span>
+          <span className="value">{data.location_score != null ? `${data.location_score}/100` : "N/A"}</span>
         </div>
       </div>
     </div>

@@ -31,11 +31,11 @@ class GuarantorInfo(BaseModel):
 
 class PropertyBasicInfo(BaseModel):
     """담보 물건 기초 정보"""
-    units: int
-    corridor_type: str
-    age: int
-    area: int
-    location_score: int
+    units: Optional[int] = None
+    corridor_type: Optional[str] = None
+    age: Optional[int] = None
+    area: Optional[int] = None
+    location_score: Optional[int] = None
     address: str
 
 

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     )
 
     # Database
-    database_url: str = "postgresql://kb_user:kb_password@localhost:5432/kb_estate"
+    database_url: str = "postgresql://kb_user:kb_password@localhost:5433/kb_estate"
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

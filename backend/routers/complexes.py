@@ -43,6 +43,9 @@ class ComplexSchema(BaseModel):
     priority: PriorityLevel
     is_active: bool
     collect_listings: bool
+    total_households: Optional[int] = None
+    corridor_type: Optional[str] = None
+    build_year: Optional[int] = None
     areas: List[AreaSchema] = []
 
     class Config:

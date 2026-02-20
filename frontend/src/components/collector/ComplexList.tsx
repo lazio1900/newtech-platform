@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react"
-import { useComplexes, useCollectComplex, useComplexLastRuns, useDiscoverRegion, useSigunguList, useRunStatus } from "@/hooks/useComplexes"
+import { useComplexes, useCollectComplex, useComplexLastRuns, useDiscoverRegion, useBatchDiscoverRegion, useSigunguList, useRunStatus } from "@/hooks/useComplexes"
 import StatusBadge from "./StatusBadge"
 import Pagination from "./Pagination"
 import ComplexFormModal from "./ComplexFormModal"
@@ -29,6 +29,7 @@ const ComplexList: React.FC<ComplexListProps> = ({ onSelectComplex }) => {
   const [editComplex, setEditComplex] = useState<Complex | null>(null)
   const [selectedSido, setSelectedSido] = useState("")
   const [discoverCode, setDiscoverCode] = useState("")
+  const [selectedSigungus, setSelectedSigungus] = useState<Set<string>>(new Set())
   const [activeRunId, setActiveRunId] = useState<number | null>(null)
   const [discoverResult, setDiscoverResult] = useState<{
     total_found: number; new_registered: number; already_exists: number
@@ -42,6 +43,7 @@ const ComplexList: React.FC<ComplexListProps> = ({ onSelectComplex }) => {
   const { data: lastRuns } = useComplexLastRuns()
   const collectMutation = useCollectComplex()
   const discoverMutation = useDiscoverRegion()
+  const { progress: batchProgress, start: startBatchDiscover, cancel: cancelBatchDiscover, reset: resetBatchDiscover } = useBatchDiscoverRegion()
   const { data: sigunguList, isLoading: sigunguLoading } = useSigunguList(selectedSido)
   const { data: runStatus } = useRunStatus(activeRunId)
 
@@ -106,7 +108,7 @@ const ComplexList: React.FC<ComplexListProps> = ({ onSelectComplex }) => {
         <div className="collector-toolbar-right">
           <button
             className="collector-btn collector-btn-outline"
-            onClick={() => { setShowDiscoverModal(true); setDiscoverResult(null); setDiscoverCode(""); setSelectedSido(""); }}
+            onClick={() => { setShowDiscoverModal(true); setDiscoverResult(null); setDiscoverCode(""); setSelectedSido(""); setSelectedSigungus(new Set()); resetBatchDiscover(); }}
           >
             지역 발견
           </button>
@@ -307,7 +309,10 @@ const ComplexList: React.FC<ComplexListProps> = ({ onSelectComplex }) => {
                       className={`collector-btn collector-btn-sm ${selectedSido === s.code ? "collector-btn-primary" : "collector-btn-outline"}`}
                       onClick={() => {
                         setSelectedSido(s.code)
-                        setDiscoverCode(s.code)
+                        setSelectedSigungus(new Set())
+                        setDiscoverCode("")
+                        setDiscoverResult(null)
+                        resetBatchDiscover()
                       }}
                     >
                       {s.name}
@@ -325,17 +330,47 @@ const ComplexList: React.FC<ComplexListProps> = ({ onSelectComplex }) => {
                       <span style={{ fontSize: 13, color: "#666" }}>시군구 목록 불러오는 중...</span>
                     </div>
                   ) : sigunguList && sigunguList.length > 0 ? (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
-                      {sigunguList.map((sg) => (
-                        <button
-                          key={sg.code}
-                          className={`collector-btn collector-btn-sm ${discoverCode === sg.code ? "collector-btn-primary" : "collector-btn-outline"}`}
-                          onClick={() => setDiscoverCode(sg.code)}
-                        >
-                          {sg.name}
-                        </button>
-                      ))}
-                    </div>
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedSigungus.size === sigunguList.length}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedSigungus(new Set(sigunguList.map((sg) => sg.code)))
+                              } else {
+                                setSelectedSigungus(new Set())
+                              }
+                            }}
+                            disabled={batchProgress.status === "running"}
+                          />
+                          전체 선택 ({sigunguList.length}개)
+                        </label>
+                        {selectedSigungus.size > 0 && selectedSigungus.size < sigunguList.length && (
+                          <span style={{ fontSize: 12, color: "#666" }}>{selectedSigungus.size}개 선택됨</span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+                        {sigunguList.map((sg) => (
+                          <button
+                            key={sg.code}
+                            className={`collector-btn collector-btn-sm ${selectedSigungus.has(sg.code) ? "collector-btn-primary" : "collector-btn-outline"}`}
+                            disabled={batchProgress.status === "running"}
+                            onClick={() => {
+                              setSelectedSigungus((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(sg.code)) next.delete(sg.code)
+                                else next.add(sg.code)
+                                return next
+                              })
+                            }}
+                          >
+                            {sg.name}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   ) : (
                     <p style={{ fontSize: 13, color: "#999", padding: "8px 0" }}>
                       시군구 목록을 불러올 수 없습니다. 아래에서 지역코드를 직접 입력해주세요.
@@ -345,16 +380,18 @@ const ComplexList: React.FC<ComplexListProps> = ({ onSelectComplex }) => {
               )}
 
               <div className="collector-form-group">
-                <label>선택된 지역코드 {discoverCode.length === 2 && "(시/도 전체)"}{discoverCode.length === 5 && "(시/군/구)"}</label>
+                <label>직접 입력 (단일 발견)</label>
                 <input
                   className="collector-input"
                   type="text"
                   placeholder="예: 11680 (강남구), 1168010100 (역삼동)"
                   value={discoverCode}
                   onChange={(e) => setDiscoverCode(e.target.value)}
+                  disabled={batchProgress.status === "running"}
                 />
               </div>
 
+              {/* 단일 발견 로딩/에러/결과 */}
               {discoverMutation.isPending && (
                 <div className="collector-loading" style={{ padding: "20px 0" }}>
                   <div className="spinner" />
@@ -390,26 +427,151 @@ const ComplexList: React.FC<ComplexListProps> = ({ onSelectComplex }) => {
                   </div>
                 </div>
               )}
+
+              {/* 배치 발견 진행률 */}
+              {batchProgress.status === "running" && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
+                    <span>{batchProgress.currentRegion} 발견 중...</span>
+                    <span>{batchProgress.completedRegions}/{batchProgress.totalRegions}</span>
+                  </div>
+                  <div style={{ height: 8, backgroundColor: "#e0e0e0", borderRadius: 4, overflow: "hidden", marginBottom: 12 }}>
+                    <div style={{
+                      height: "100%", borderRadius: 4, transition: "width 0.3s",
+                      width: `${Math.round((batchProgress.completedRegions / batchProgress.totalRegions) * 100)}%`,
+                      backgroundColor: "#006FBD",
+                    }} />
+                  </div>
+                  <div style={{ display: "flex", gap: 20, marginBottom: 12, fontSize: 13 }}>
+                    <div>총 발견: <strong>{batchProgress.summary.total_found}</strong></div>
+                    <div>신규: <strong style={{ color: "#006FBD" }}>{batchProgress.summary.new_registered}</strong></div>
+                    <div>기존: <strong style={{ color: "#999" }}>{batchProgress.summary.already_exists}</strong></div>
+                    {batchProgress.summary.failed > 0 && (
+                      <div>실패: <strong style={{ color: "#EF5350" }}>{batchProgress.summary.failed}</strong></div>
+                    )}
+                  </div>
+                  <div style={{ maxHeight: 140, overflowY: "auto", fontSize: 12 }}>
+                    {batchProgress.results.map((r, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                        <span style={{
+                          width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                          backgroundColor: r.error ? "#EF5350" : "#20c997",
+                        }} />
+                        <span>{r.regionName}</span>
+                        {r.error ? (
+                          <span style={{ color: "#EF5350" }}>{r.error}</span>
+                        ) : (
+                          <span style={{ color: "#999" }}>발견 {r.total_found} / 신규 {r.new_registered}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 배치 발견 완료/취소 결과 */}
+              {(batchProgress.status === "completed" || batchProgress.status === "cancelled") && (
+                <div style={{
+                  marginTop: 16, padding: 16, borderRadius: 8,
+                  backgroundColor: batchProgress.status === "completed" ? "#f0f9f4" : "#fff8f0",
+                  border: `1px solid ${batchProgress.status === "completed" ? "#20c997" : "#FF8C00"}`,
+                }}>
+                  <p style={{ fontWeight: 700, marginBottom: 8, color: batchProgress.status === "completed" ? "#2E7D32" : "#E65100" }}>
+                    {batchProgress.status === "completed" ? "일괄 발견 완료" : `발견 취소 (${batchProgress.completedRegions}/${batchProgress.totalRegions} 처리)`}
+                  </p>
+                  <div style={{ display: "flex", gap: 24 }}>
+                    <div>
+                      <span style={{ fontSize: 12, color: "#666" }}>총 발견</span>
+                      <p style={{ fontSize: 20, fontWeight: 700 }}>{batchProgress.summary.total_found}개</p>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: 12, color: "#666" }}>신규 등록</span>
+                      <p style={{ fontSize: 20, fontWeight: 700, color: "#006FBD" }}>{batchProgress.summary.new_registered}개</p>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: 12, color: "#666" }}>이미 존재</span>
+                      <p style={{ fontSize: 20, fontWeight: 700, color: "#999" }}>{batchProgress.summary.already_exists}개</p>
+                    </div>
+                    {batchProgress.summary.failed > 0 && (
+                      <div>
+                        <span style={{ fontSize: 12, color: "#666" }}>실패</span>
+                        <p style={{ fontSize: 20, fontWeight: 700, color: "#EF5350" }}>{batchProgress.summary.failed}개</p>
+                      </div>
+                    )}
+                  </div>
+                  {batchProgress.results.length > 0 && (
+                    <div style={{ marginTop: 12, maxHeight: 140, overflowY: "auto", fontSize: 12 }}>
+                      {batchProgress.results.map((r, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+                          <span style={{
+                            width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                            backgroundColor: r.error ? "#EF5350" : "#20c997",
+                          }} />
+                          <span>{r.regionName}</span>
+                          {r.error ? (
+                            <span style={{ color: "#EF5350" }}>{r.error}</span>
+                          ) : (
+                            <span style={{ color: "#999" }}>발견 {r.total_found} / 신규 {r.new_registered}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="collector-modal-footer">
               <button
                 className="collector-btn collector-btn-outline"
-                onClick={() => setShowDiscoverModal(false)}
-              >
-                닫기
-              </button>
-              <button
-                className="collector-btn collector-btn-primary"
-                disabled={!discoverCode.trim() || discoverMutation.isPending}
                 onClick={() => {
-                  setDiscoverResult(null)
-                  discoverMutation.mutate(discoverCode.trim(), {
-                    onSuccess: (result) => setDiscoverResult(result),
-                  })
+                  if (batchProgress.status === "running") {
+                    cancelBatchDiscover()
+                  } else {
+                    setShowDiscoverModal(false)
+                    resetBatchDiscover()
+                  }
                 }}
               >
-                {discoverMutation.isPending ? "검색 중..." : "발견 시작"}
+                {batchProgress.status === "running" ? "취소" : "닫기"}
               </button>
+              {selectedSigungus.size > 1 ? (
+                <button
+                  className="collector-btn collector-btn-primary"
+                  disabled={batchProgress.status === "running"}
+                  onClick={() => {
+                    setDiscoverResult(null)
+                    resetBatchDiscover()
+                    const regions = (sigunguList ?? [])
+                      .filter((sg) => selectedSigungus.has(sg.code))
+                      .map((sg) => ({ code: sg.code, name: sg.name }))
+                    startBatchDiscover(regions)
+                  }}
+                >
+                  {batchProgress.status === "running"
+                    ? `발견 중... (${batchProgress.completedRegions}/${batchProgress.totalRegions})`
+                    : `${selectedSigungus.size}개 지역 일괄 발견`}
+                </button>
+              ) : (
+                <button
+                  className="collector-btn collector-btn-primary"
+                  disabled={
+                    (selectedSigungus.size === 0 && !discoverCode.trim()) ||
+                    discoverMutation.isPending ||
+                    batchProgress.status === "running"
+                  }
+                  onClick={() => {
+                    setDiscoverResult(null)
+                    const code = selectedSigungus.size === 1
+                      ? [...selectedSigungus][0]
+                      : discoverCode.trim()
+                    discoverMutation.mutate(code, {
+                      onSuccess: (result) => setDiscoverResult(result),
+                    })
+                  }}
+                >
+                  {discoverMutation.isPending ? "검색 중..." : "발견 시작"}
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -331,16 +331,17 @@ class ComplexDiscoveryService:
                     break
 
             pyeong = None
-            for key in ["pyeong", "평형", "py"]:
+            for key in ["공급면적평", "전용면적평", "pyeong", "평형", "평", "py"]:
                 if key in area_data and area_data[key]:
                     try:
                         pyeong = float(str(area_data[key]).replace(",", ""))
                     except (ValueError, TypeError):
                         pass
-                    break
+                    if pyeong:
+                        break
 
             kb_area_code = None
-            for key in ["areaNo", "kb_area_code", "면적코드", "areaCode"]:
+            for key in ["면적일련번호", "areaNo", "kb_area_code", "면적코드", "areaCode"]:
                 if key in area_data and area_data[key]:
                     kb_area_code = str(area_data[key])
                     break

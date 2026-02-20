@@ -1,4 +1,13 @@
-from models.response_models import AnalysisData, AnalysisResponse, AIAnalysis, RightsAnalysisDetail
+import logging
+from datetime import date
+from typing import Optional
+
+from sqlalchemy.orm import Session
+
+from models.response_models import (
+    AnalysisData, AnalysisResponse, AIAnalysis, RightsAnalysisDetail,
+    PropertyBasicInfo,
+)
 from services.dummy_data import (
     generate_borrower_info,
     generate_guarantor_info,
@@ -9,6 +18,9 @@ from services.dummy_data import (
     generate_nearby_property_trends,
     generate_price_per_pyeong_trend
 )
+from services.real_data_service import get_real_market_data
+
+logger = logging.getLogger(__name__)
 
 # TODO: Claude API 연동 시 아래 주석 해제
 # from services.claude_service import ClaudeClient
@@ -19,31 +31,109 @@ from services.dummy_data import (
 # )
 
 
+def _build_real_property_basic_info(
+    complex_obj,
+    area_obj,
+    property_address: str,
+) -> PropertyBasicInfo:
+    """DB의 Complex/Area 데이터로 담보 물건 기초 정보를 구성한다."""
+    units = complex_obj.total_households  # None이면 N/A
+    corridor_type = complex_obj.corridor_type  # None이면 N/A
+
+    age = None
+    if complex_obj.build_year:
+        age = date.today().year - complex_obj.build_year
+
+    area_pyeong = None
+    if area_obj:
+        if area_obj.pyeong:
+            area_pyeong = int(area_obj.pyeong)
+        elif area_obj.exclusive_m2:
+            area_pyeong = int(area_obj.exclusive_m2 / 3.305785)
+
+    # location_score는 DB에 없음 (지리 API 필요) → None (N/A)
+    return PropertyBasicInfo(
+        address=complex_obj.address or property_address,
+        units=units,
+        corridor_type=corridor_type,
+        age=age,
+        area=area_pyeong,
+        location_score=None,
+    )
+
+
 def perform_full_analysis(
     company_name: str,
     property_address: str,
-    loan_amount: int
+    loan_amount: int,
+    db: Optional[Session] = None,
 ) -> AnalysisResponse:
-    """전체 분석 수행"""
+    """전체 분석 수행 - 실 수집 데이터 우선, 없으면 더미 폴백"""
 
-    # 1. 더미 데이터 생성
+    # 0. 실 수집 데이터 조회 시도
+    real_data = None
+    should_close_db = False
+
+    if db is None:
+        try:
+            from core.database import SessionLocal
+            db = SessionLocal()
+            should_close_db = True
+        except Exception as e:
+            logger.warning(f"DB 연결 불가, 더미 데이터 사용: {e}")
+            db = None
+
+    if db is not None:
+        try:
+            real_data = get_real_market_data(db, property_address)
+        except Exception as e:
+            logger.warning(f"실 데이터 조회 실패, 더미 폴백: {e}")
+            real_data = None
+        finally:
+            if should_close_db:
+                db.close()
+
+    # 담보 물건 기초 정보: 실 DB 우선, 없으면 더미
+    if real_data and real_data.get("complex"):
+        property_basic_info = _build_real_property_basic_info(
+            real_data["complex"],
+            real_data.get("area"),
+            property_address,
+        )
+    else:
+        property_basic_info = generate_property_basic_info(property_address)
+
+    # 1. 더미 데이터 생성 (실 데이터 없는 항목만)
     borrower_info = generate_borrower_info(company_name)
     guarantor_info = generate_guarantor_info()
-    property_basic_info = generate_property_basic_info(property_address)
     property_rights_info = generate_property_rights_info()
-    credit_data = generate_credit_data(property_address)
 
-    # 1-1. 입지 점수 생성
+    # 시세 데이터: 실 데이터 우선, 없으면 더미
+    credit_data = (
+        real_data["credit_data"]
+        if real_data and real_data.get("credit_data")
+        else generate_credit_data(property_address)
+    )
+
+    # 1-1. 입지 점수 생성 (항상 더미 - 지리 API 필요)
     location_scores = generate_location_scores(property_address)
 
-    # 1-2. 인근 유사 물건지 동향
-    nearby_trends = generate_nearby_property_trends(property_address, property_basic_info)
+    # 1-2. 인근 유사 물건지 동향: 실 데이터 우선
+    nearby_trends = (
+        real_data["nearby_trends"]
+        if real_data and real_data.get("nearby_trends")
+        else generate_nearby_property_trends(property_address, property_basic_info)
+    )
 
-    # 1-3. 평단가 추이
-    price_per_pyeong = generate_price_per_pyeong_trend(
-        property_address,
-        credit_data.kb_price.estimated,
-        property_basic_info.area
+    # 1-3. 평단가 추이: 실 데이터 우선
+    price_per_pyeong = (
+        real_data["price_per_pyeong"]
+        if real_data and real_data.get("price_per_pyeong")
+        else generate_price_per_pyeong_trend(
+            property_address,
+            credit_data.kb_price.estimated,
+            property_basic_info.area or 34
+        )
     )
 
     # 2. AI 종합 의견 생성 (하드코딩)
@@ -78,7 +168,11 @@ def perform_full_analysis(
     # )
     # comprehensive_opinion = claude_client.analyze(comprehensive_prompt)
     # 가압류 존재 여부 확인 (갑구 기타사항에서)
-    has_seizure = any('가압류' in e.purpose or '가처분' in e.purpose for e in property_rights_info.ownership_other_entries)
+    has_seizure = any(
+        '가압류' in (e.get('purpose', '') if isinstance(e, dict) else getattr(e, 'purpose', ''))
+        or '가처분' in (e.get('purpose', '') if isinstance(e, dict) else getattr(e, 'purpose', ''))
+        for e in property_rights_info.ownership_other_entries
+    )
     seizure_text = '가압류 1건 존재하여 해소 조건 부과 필요.' if has_seizure else '가압류 등 특이사항 없음.'
 
     comprehensive_opinion = f"""[입지] {property_address} 소재 물건은 역세권·학군·대단지 요건을 갖추고 있으며, 입지 종합 등급 A로 담보 적격성이 양호합니다.

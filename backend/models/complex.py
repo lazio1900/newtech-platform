@@ -29,7 +29,12 @@ class Complex(Base):
     priority = Column(Enum(PriorityLevel), default=PriorityLevel.NORMAL, comment="수집 우선순위")
     is_active = Column(Boolean, default=True, comment="수집 활성화 여부")
     collect_listings = Column(Boolean, default=True, comment="매물 수집 여부")
-    
+
+    # 단지 상세 정보 (크롤링으로 수집)
+    total_households = Column(Integer, nullable=True, comment="총 세대수")
+    corridor_type = Column(String(50), nullable=True, comment="복도타입(계단식/복도식/혼합식)")
+    build_year = Column(Integer, nullable=True, comment="준공연도")
+
     # 메타데이터
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

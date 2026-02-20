@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from datetime import datetime
@@ -7,11 +7,7 @@ from datetime import datetime
 import json
 
 from core.database import get_db
-from models import CrawlJob, CrawlRun, JobType, JobStatus, RunStatus
-from workers.tasks import (
-    run_kb_collection,
-    run_region_collection,
-)
+from models import CrawlJob, CrawlRun, Complex, JobType, JobStatus, RunStatus
 
 router = APIRouter()
 
@@ -52,6 +48,27 @@ class JobSchema(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+def _resolve_complex_ids(job: CrawlJob, db: Session) -> List[int]:
+    """Job의 target_config를 분석하여 수집 대상 단지 ID 목록을 반환"""
+    config = json.loads(job.target_config) if job.target_config else {}
+
+    if job.job_type == JobType.REGION_ALL:
+        region_code = config.get("region_code") or config.get("sido_code", "")
+        return [
+            c.id for c in db.query(Complex).filter(
+                Complex.region_code.like(f"{region_code}%"),
+                Complex.is_active.is_(True),
+            ).all()
+        ]
+
+    # complex_ids가 직접 지정된 경우
+    if "complex_ids" in config:
+        return config["complex_ids"]
+
+    # 기본: 모든 활성 단지
+    return [c.id for c in db.query(Complex).filter(Complex.is_active.is_(True)).all()]
 
 
 def _enrich_jobs_with_last_run(jobs: list, db: Session) -> list:
@@ -140,6 +157,7 @@ def create_job(
 @router.post("/create-and-run", status_code=status.HTTP_202_ACCEPTED)
 def create_and_run_job(
     job_data: JobCreateSchema,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """작업 생성 + 즉시 실행"""
@@ -157,34 +175,24 @@ def create_and_run_job(
     db.add(run)
     db.commit()
 
-    # region_all 타입 처리
-    if job.job_type == JobType.REGION_ALL:
-        config = json.loads(job.target_config) if job.target_config else {}
-        region_code = config.get("region_code")
-        if not region_code:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="region_all 작업에 region_code가 설정되지 않았습니다",
-            )
-        task = run_region_collection.delay(
-            region_code=region_code, job_id=job.id, run_id=run.id,
-        )
-    else:
-        # KB 데이터 통합 수집 (시세 + 실거래 + 매물)
-        task = run_kb_collection.delay(
-            job_id=job.id, run_id=run.id, target_config=job.target_config,
-        )
+    complex_ids = _resolve_complex_ids(job, db)
+
+    from services.sync_collector import collect_complex_sync
+    background_tasks.add_task(collect_complex_sync, run.id, complex_ids)
 
     return {
         "message": "작업이 생성되고 즉시 실행되었습니다",
         "job_id": job.id,
         "run_id": run.id,
-        "task_id": task.id,
     }
 
 
 @router.post("/{job_id}/run", status_code=status.HTTP_202_ACCEPTED)
-def run_job_now(job_id: int, db: Session = Depends(get_db)):
+def run_job_now(
+    job_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """작업 즉시 실행"""
     job = db.query(CrawlJob).filter(CrawlJob.id == job_id).first()
 
@@ -209,29 +217,15 @@ def run_job_now(job_id: int, db: Session = Depends(get_db)):
     db.add(run)
     db.commit()
 
-    # region_all 타입은 target_config에서 region_code를 꺼내 사용
-    if job.job_type == JobType.REGION_ALL:
-        config = json.loads(job.target_config) if job.target_config else {}
-        region_code = config.get("region_code")
-        if not region_code:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="region_all 작업에 region_code가 설정되지 않았습니다",
-            )
-        task = run_region_collection.delay(
-            region_code=region_code, job_id=job.id, run_id=run.id,
-        )
-    else:
-        # KB 데이터 통합 수집 (시세 + 실거래 + 매물)
-        task = run_kb_collection.delay(
-            job_id=job.id, run_id=run.id, target_config=job.target_config,
-        )
+    complex_ids = _resolve_complex_ids(job, db)
+
+    from services.sync_collector import collect_complex_sync
+    background_tasks.add_task(collect_complex_sync, run.id, complex_ids)
 
     return {
         "message": "Job execution started",
         "job_id": job.id,
         "run_id": run.id,
-        "task_id": task.id,
     }
 
 
@@ -298,6 +292,7 @@ def resume_job(job_id: int, db: Session = Depends(get_db)):
 @router.post("/run-region", status_code=status.HTTP_202_ACCEPTED)
 def run_region_collection_endpoint(
     region_code: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """
@@ -335,12 +330,19 @@ def run_region_collection_endpoint(
     db.add(run)
     db.commit()
 
-    task = run_region_collection.delay(
-        region_code=region_code, job_id=job.id, run_id=run.id,
-    )
+    # 해당 지역 활성 단지 조회
+    complex_ids = [
+        c.id for c in db.query(Complex).filter(
+            Complex.region_code.like(f"{region_code}%"),
+            Complex.is_active.is_(True),
+        ).all()
+    ]
+
+    from services.sync_collector import collect_complex_sync
+    background_tasks.add_task(collect_complex_sync, run.id, complex_ids)
+
     return {
         "message": f"{region_code} 지역 수집이 시작되었습니다",
-        "task_id": task.id,
         "run_id": run.id,
         "job_id": job.id,
     }

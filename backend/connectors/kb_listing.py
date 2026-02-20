@@ -78,6 +78,7 @@ class KBListingConnector(KBBaseConnector):
             if brif_resp.status_code != 200:
                 raise NetworkError(f"brif HTTP {brif_resp.status_code}")
             brif_data = brif_resp.json().get("dataBody", {}).get("data", {})
+            logger.info(f"{self.name}: brif keys={list(brif_data.keys())[:20]}")
             if not brif_data:
                 raise NetworkError(f"brif returned empty data for {kb_complex_id}")
 
@@ -124,9 +125,44 @@ class KBListingConnector(KBBaseConnector):
                     break
 
         logger.info(f"{self.name}: Fetched {len(all_items)} listings for {brif_data.get('단지명')}")
+
+        # brif_data에서 주소 추출 - 여러 전략 시도
+        complex_address = ""
+        # 1) 단일 주소 필드
+        for key in ["도로명주소", "소재지도로명주소", "주소", "소재지주소", "법정동주소",
+                     "단지주소", "roadAddr", "addrNm", "address", "addr"]:
+            if key in brif_data and brif_data[key]:
+                complex_address = str(brif_data[key]).strip()
+                break
+        # 2) 컴포넌트 조합
+        if not complex_address:
+            parts = []
+            for key in ["시도명", "시군구명", "법정동명"]:
+                val = brif_data.get(key, "")
+                if val:
+                    parts.append(str(val).strip())
+            if parts:
+                complex_address = " ".join(parts)
+        # 3) "주소" 또는 "addr"가 포함된 키 탐색
+        if not complex_address:
+            for key, val in brif_data.items():
+                if ("주소" in str(key) or "addr" in str(key).lower()) and val:
+                    val_str = str(val).strip()
+                    if len(val_str) >= 4:
+                        complex_address = val_str
+                        break
+
+        if not complex_address:
+            logger.warning(f"{self.name}: no address found in brif_data")
+
         return {
             "data": {"propertyList": all_items, "총매물건수": len(all_items)},
-            "metadata": {"method": "http_direct", "source": "kb"},
+            "metadata": {
+                "method": "http_direct",
+                "source": "kb",
+                "complex_address": complex_address,
+                "complex_name": brif_data.get("단지명", ""),
+            },
         }
 
     def parse(self, raw_data: Any) -> List[Dict[str, Any]]:

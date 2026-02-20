@@ -374,8 +374,10 @@ def generate_nearby_property_trends(address: str, property_basic_info: PropertyB
         prop_address = f"{sido} {sigungu} {dong}"
 
         # 유사 세대수 (±200), 유사 연식 (±5년)
-        sim_units = max(100, property_basic_info.units + random.randint(-200, 200))
-        sim_age = max(1, property_basic_info.age + random.randint(-5, 5))
+        base_units = property_basic_info.units or 500
+        base_age = property_basic_info.age or 15
+        sim_units = max(100, base_units + random.randint(-200, 200))
+        sim_age = max(1, base_age + random.randint(-5, 5))
         sim_area = random.choice([24, 29, 34, 39, 42, 51, 59])
 
         # 좌표: 대상 물건 주변 약 300~500m 반경

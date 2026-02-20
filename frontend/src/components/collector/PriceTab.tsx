@@ -51,7 +51,8 @@ const PriceTab: React.FC<PriceTabProps> = ({ complexId, areas = [] }) => {
     const area = areaMap[areaId]
     if (!area) return `#${areaId}`
     const pyeong = area.pyeong ? `${area.pyeong}평` : `${(area.exclusive_m2 / 3.3058).toFixed(0)}평`
-    return `${area.exclusive_m2}㎡ (${pyeong})`
+    const supply = area.supply_m2 ? ` / 공급 ${area.supply_m2}㎡` : ""
+    return `전용 ${area.exclusive_m2}㎡${supply} (${pyeong})`
   }
 
   const formatPrice = (v: number | null) => {
@@ -69,12 +70,13 @@ const PriceTab: React.FC<PriceTabProps> = ({ complexId, areas = [] }) => {
   const handleExportCSV = useCallback(() => {
     if (!chartPrices.length) return
 
-    const headers = ["기준일", "전용면적(㎡)", "평형", "일반가(만원)", "상위평균(만원)", "하위평균(만원)", "수집일"]
+    const headers = ["기준일", "전용면적(㎡)", "공급면적(㎡)", "평형", "일반가(만원)", "상위평균(만원)", "하위평균(만원)", "수집일"]
     const rows = chartPrices.map((p) => {
       const area = areaMap[p.area_id]
       return [
         p.as_of_date,
         area?.exclusive_m2 ?? "",
+        area?.supply_m2 ?? "",
         area?.pyeong ?? "",
         p.general_price ?? "",
         p.high_avg_price ?? "",
@@ -111,7 +113,7 @@ const PriceTab: React.FC<PriceTabProps> = ({ complexId, areas = [] }) => {
               <option value="">전체 면적</option>
               {areas.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.exclusive_m2}㎡{a.pyeong ? ` (${a.pyeong}평)` : ` (${(a.exclusive_m2 / 3.3058).toFixed(0)}평)`}
+                  전용 {a.exclusive_m2}㎡{a.supply_m2 ? ` / 공급 ${a.supply_m2}㎡` : ""}{a.pyeong ? ` (${a.pyeong}평)` : ` (${(a.exclusive_m2 / 3.3058).toFixed(0)}평)`}
                 </option>
               ))}
             </select>
@@ -156,7 +158,7 @@ const PriceTab: React.FC<PriceTabProps> = ({ complexId, areas = [] }) => {
               <thead>
                 <tr>
                   <th>기준일</th>
-                  <th>전용면적</th>
+                  <th>면적 (전용/공급)</th>
                   <th>일반가</th>
                   <th>상위평균</th>
                   <th>하위평균</th>

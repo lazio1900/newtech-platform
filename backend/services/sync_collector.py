@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import List
 
+import httpx
 from sqlalchemy.orm import Session
 
 from core.database import SessionLocal
@@ -18,8 +19,166 @@ from models import (
     RunStatus, TaskStatus,
 )
 from connectors import KBPriceConnector, KBTransactionConnector, KBListingConnector
+from connectors.kb_endpoints import COMPLEX_DETAIL
 
 logger = logging.getLogger(__name__)
+
+_KB_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://kbland.kr/map",
+    "Origin": "https://kbland.kr",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+    "webservice": "1",
+}
+
+
+def _extract_address(data: dict) -> str:
+    """dict에서 주소를 추출하는 공통 함수. 여러 전략으로 시도."""
+    # 1) 단일 주소 필드 검색
+    for key in ["도로명주소", "소재지도로명주소", "주소", "소재지주소", "법정동주소",
+                 "단지주소", "roadAddr", "addrNm", "address", "addr"]:
+        if key in data and data[key]:
+            val = str(data[key]).strip()
+            if val:
+                return val
+
+    # 2) 컴포넌트 조합
+    parts = []
+    for key in ["시도명", "시군구명", "법정동명"]:
+        val = data.get(key, "")
+        if val:
+            parts.append(str(val).strip())
+    if parts:
+        return " ".join(parts)
+
+    # 3) 키 이름에 "주소" 또는 "addr"가 포함된 아무 필드
+    for key, val in data.items():
+        if ("주소" in str(key) or "addr" in str(key).lower()) and val:
+            val_str = str(val).strip()
+            if len(val_str) >= 4:
+                return val_str
+
+    return ""
+
+
+def _update_complex_info(db: Session, complex_obj: Complex) -> None:
+    """
+    COMPLEX_DETAIL API를 동기 httpx로 호출하여 단지 정보(주소, 세대수, 복도타입, 연식) 갱신.
+    """
+    if not complex_obj.kb_complex_id:
+        return
+
+    try:
+        with httpx.Client(
+            headers=_KB_HEADERS, http2=True, timeout=30.0, follow_redirects=True,
+        ) as client:
+            resp = client.get(
+                COMPLEX_DETAIL.url,
+                params={"단지기본일련번호": complex_obj.kb_complex_id, "물건종류": "01"},
+            )
+
+        if resp.status_code != 200:
+            logger.warning(
+                f"Complex {complex_obj.id}: COMPLEX_DETAIL HTTP {resp.status_code}"
+            )
+            return
+
+        resp_json = resp.json()
+        body = resp_json.get("dataBody", {}).get("data", {})
+
+        # list인 경우 첫 번째 dict 사용
+        if isinstance(body, list) and body:
+            body = body[0] if isinstance(body[0], dict) else {}
+        elif not isinstance(body, dict):
+            body = {}
+
+        logger.info(
+            f"Complex {complex_obj.id}: COMPLEX_DETAIL keys={list(body.keys())[:30]}"
+        )
+
+        if not body:
+            logger.warning(f"Complex {complex_obj.id}: COMPLEX_DETAIL returned empty body")
+            return
+
+        updated = False
+
+        # 주소
+        address = _extract_address(body)
+        if address and (not complex_obj.address or len(address) > len(complex_obj.address)):
+            complex_obj.address = address
+            updated = True
+
+        # 세대수
+        if not complex_obj.total_households:
+            for key in ["세대수", "총세대수", "세대총수", "totalUnits", "householdCount", "단지세대수"]:
+                val = body.get(key)
+                if val:
+                    try:
+                        complex_obj.total_households = int(str(val).replace(",", ""))
+                        updated = True
+                        break
+                    except (ValueError, TypeError):
+                        pass
+
+        # 복도타입
+        if not complex_obj.corridor_type:
+            for key in ["복도유형", "복도유형명", "복도타입", "corridorType", "corridorTypeName"]:
+                val = body.get(key)
+                if val:
+                    complex_obj.corridor_type = str(val).strip()
+                    updated = True
+                    break
+
+        # 준공연도
+        if not complex_obj.build_year:
+            for key in ["준공년도", "사용승인일", "건축년도", "completionYear", "useApprovalDate"]:
+                val = body.get(key)
+                if val:
+                    try:
+                        year_str = str(val).replace(",", "").strip()[:4]
+                        year = int(year_str)
+                        if 1960 <= year <= 2030:
+                            complex_obj.build_year = year
+                            updated = True
+                            break
+                    except (ValueError, TypeError):
+                        pass
+
+        if updated:
+            db.flush()
+            logger.info(
+                f"Complex {complex_obj.id} ({complex_obj.name}): info updated "
+                f"addr='{complex_obj.address}' units={complex_obj.total_households} "
+                f"corridor={complex_obj.corridor_type} year={complex_obj.build_year}"
+            )
+
+    except Exception as e:
+        logger.warning(f"Complex {complex_obj.id}: COMPLEX_DETAIL fetch failed: {e}")
+
+
+def _update_address_from_metadata(db: Session, complex_id: int, metadata: dict) -> None:
+    """수집 결과의 metadata(brif_data)에서 주소를 추출하여 갱신."""
+    address = metadata.get("complex_address", "")
+    if not address:
+        return
+
+    complex_obj = db.get(Complex, complex_id)
+    if not complex_obj:
+        return
+
+    if not complex_obj.address or len(address) > len(complex_obj.address):
+        old_address = complex_obj.address
+        complex_obj.address = address
+        db.flush()
+        logger.info(
+            f"Complex {complex_id} ({complex_obj.name}): "
+            f"address updated from brif '{old_address}' → '{address}'"
+        )
 
 
 def _ensure_areas(db: Session, complex_obj: Complex) -> List[Area]:
@@ -66,10 +225,14 @@ def _ensure_areas(db: Session, complex_obj: Complex) -> List[Area]:
                 pass
 
             pyeong = None
-            try:
-                pyeong = float(str(a.get("평", "")).replace(",", "")) or None
-            except (ValueError, TypeError):
-                pass
+            for pkey in ["공급면적평", "전용면적평", "평"]:
+                try:
+                    val = a.get(pkey, "")
+                    pyeong = float(str(val).replace(",", "")) or None
+                    if pyeong:
+                        break
+                except (ValueError, TypeError):
+                    pass
 
             area_code = str(a.get("면적일련번호", "")) or None
             area = Area(
@@ -231,6 +394,9 @@ def _collect_listing(db: Session, run_id: int, complex_id: int) -> dict:
                 s.status = ListingStatus.REMOVED
                 s.status_updated_at = datetime.utcnow()
 
+        # brif 메타데이터에서 주소 갱신
+        _update_address_from_metadata(db, complex_id, result.get("metadata", {}))
+
         db.commit()
         task_record.status = TaskStatus.SUCCESS
         task_record.items_collected = len(result["items"])
@@ -294,6 +460,9 @@ def collect_complex_sync(run_id: int, complex_ids: List[int]):
         failed_count = 0
 
         for c, areas in complex_areas:
+            # 단지 정보 갱신 (주소, 세대수, 복도타입, 연식)
+            _update_complex_info(db, c)
+
             # 시세 수집 (면적별)
             for area in areas:
                 result = _collect_price(db, run_id, c.id, area.id)

@@ -25,6 +25,14 @@ const ComplexDetail: React.FC<ComplexDetailProps> = ({ complexId, onBack }) => {
     subTab === "listings" ? { complex_id: complexId, limit: 50 } : undefined
   )
 
+  const areaMap = useMemo(() => {
+    const m: Record<number, Area> = {}
+    for (const a of complex?.areas ?? []) {
+      m[a.id] = a
+    }
+    return m
+  }, [complex?.areas])
+
   if (isLoading) {
     return (
       <div className="collector-loading">
@@ -53,19 +61,12 @@ const ComplexDetail: React.FC<ComplexDetailProps> = ({ complexId, onBack }) => {
     return `${v.toLocaleString()}만`
   }
 
-  const areaMap = useMemo(() => {
-    const m: Record<number, Area> = {}
-    for (const a of complex.areas ?? []) {
-      m[a.id] = a
-    }
-    return m
-  }, [complex.areas])
-
   const formatArea = (areaId: number) => {
     const area = areaMap[areaId]
     if (!area) return `#${areaId}`
     const pyeong = area.pyeong ? `${area.pyeong}평` : `${(area.exclusive_m2 / 3.3058).toFixed(0)}평`
-    return `${area.exclusive_m2}㎡ (${pyeong})`
+    const supply = area.supply_m2 ? ` / 공급 ${area.supply_m2}㎡` : ""
+    return `전용 ${area.exclusive_m2}㎡${supply} (${pyeong})`
   }
 
   const tabs: { key: SubTab; label: string }[] = [
@@ -116,6 +117,24 @@ const ComplexDetail: React.FC<ComplexDetailProps> = ({ complexId, onBack }) => {
             <span className="collector-info-label">매물 수집</span>
             <span className="collector-info-value">
               {complex.collect_listings ? "포함" : "미포함"}
+            </span>
+          </div>
+          <div className="collector-info-item">
+            <span className="collector-info-label">세대수</span>
+            <span className="collector-info-value">
+              {complex.total_households ? `${complex.total_households.toLocaleString()}세대` : "-"}
+            </span>
+          </div>
+          <div className="collector-info-item">
+            <span className="collector-info-label">복도타입</span>
+            <span className="collector-info-value">{complex.corridor_type ?? "-"}</span>
+          </div>
+          <div className="collector-info-item">
+            <span className="collector-info-label">연식</span>
+            <span className="collector-info-value">
+              {complex.build_year
+                ? `${new Date().getFullYear() - complex.build_year}년 (${complex.build_year}년 준공)`
+                : "-"}
             </span>
           </div>
         </div>
@@ -178,7 +197,7 @@ const ComplexDetail: React.FC<ComplexDetailProps> = ({ complexId, onBack }) => {
                 <thead>
                   <tr>
                     <th>기준일</th>
-                    <th>전용면적</th>
+                    <th>면적 (전용/공급)</th>
                     <th>일반가</th>
                     <th>상위평균</th>
                     <th>하위평균</th>

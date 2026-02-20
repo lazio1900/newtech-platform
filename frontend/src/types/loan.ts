@@ -1,11 +1,11 @@
 // 담보 물건 기초 정보
 export interface PropertyBasicData {
   address: string;
-  units: number;
-  corridor_type: string;
-  age: number;
-  area: number;
-  location_score: number;
+  units: number | null;
+  corridor_type: string | null;
+  age: number | null;
+  area: number | null;
+  location_score: number | null;
 }
 
 // 소유지분현황 (갑구)

@@ -341,19 +341,19 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                       </tr>
                       <tr>
                         <th>전용면적</th>
-                        <td>{data.property_basic_info.area}평</td>
+                        <td>{data.property_basic_info.area != null ? `${data.property_basic_info.area}평` : "N/A"}</td>
                         <th>복도타입</th>
-                        <td>{data.property_basic_info.corridor_type}</td>
+                        <td>{data.property_basic_info.corridor_type ?? "N/A"}</td>
                       </tr>
                       <tr>
                         <th>세대수</th>
-                        <td>{data.property_basic_info.units}세대</td>
+                        <td>{data.property_basic_info.units != null ? `${data.property_basic_info.units.toLocaleString()}세대` : "N/A"}</td>
                         <th>경과연수</th>
-                        <td>{data.property_basic_info.age}년</td>
+                        <td>{data.property_basic_info.age != null ? `${data.property_basic_info.age}년` : "N/A"}</td>
                       </tr>
                       <tr>
                         <th>입지점수</th>
-                        <td>{data.property_basic_info.location_score}점</td>
+                        <td>{data.property_basic_info.location_score != null ? `${data.property_basic_info.location_score}점` : "N/A"}</td>
                         <th>대출신청금액</th>
                         <td>{formatAmount(loanAmount)}</td>
                       </tr>
@@ -744,24 +744,34 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
             사후모니터링
           </button>
           <div className="sidebar-divider" />
-          <button
-            className={`sidebar-btn ${activeTab === 'collector' ? 'active' : ''}`}
-            onClick={() => setActiveTab('collector')}
-          >
-            데이터 수집 관리
-          </button>
-          <button
-            className={`sidebar-btn ${activeTab === 'runs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('runs')}
-          >
-            수집 실행 이력
-          </button>
-          <button
-            className={`sidebar-btn ${activeTab === 'dataExplorer' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dataExplorer')}
-          >
-            시세 데이터 탐색
-          </button>
+          <div className="sidebar-submenu-wrapper">
+            <button
+              className={`sidebar-btn ${activeTab === 'collector' || activeTab === 'runs' || activeTab === 'dataExplorer' ? 'active' : ''}`}
+            >
+              데이터 수집 허브
+              <span className="sidebar-submenu-arrow">&#9654;</span>
+            </button>
+            <div className="sidebar-submenu">
+              <button
+                className={`sidebar-submenu-btn ${activeTab === 'collector' ? 'active' : ''}`}
+                onClick={() => setActiveTab('collector')}
+              >
+                데이터 수집 관리
+              </button>
+              <button
+                className={`sidebar-submenu-btn ${activeTab === 'runs' ? 'active' : ''}`}
+                onClick={() => setActiveTab('runs')}
+              >
+                수집 실행 이력
+              </button>
+              <button
+                className={`sidebar-submenu-btn ${activeTab === 'dataExplorer' ? 'active' : ''}`}
+                onClick={() => setActiveTab('dataExplorer')}
+              >
+                시세 데이터 탐색
+              </button>
+            </div>
+          </div>
         </nav>
 
         <div className="dashboard-content">

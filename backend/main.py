@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from pydantic import BaseModel
@@ -21,24 +21,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Newtech routers (graceful import) ---
-try:
-    from routers.complexes import router as complexes_router
-    from routers.jobs import router as jobs_router
-    from routers.runs import router as runs_router
-    from routers.data_explorer import router as data_explorer_router
-    from routers.batches import router as batches_router
+# --- Newtech routers (각 라우터 독립적 임포트) ---
+import importlib
+import logging
 
-    app.include_router(complexes_router, prefix="/api/complexes", tags=["complexes"])
-    app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
-    app.include_router(runs_router, prefix="/api/runs", tags=["runs"])
-    app.include_router(data_explorer_router, prefix="/api/data", tags=["data_explorer"])
-    app.include_router(batches_router, prefix="/api/batches", tags=["batches"])
-except Exception as e:
-    import logging
-    logging.getLogger(__name__).warning(
-        f"Newtech routers could not be loaded (DB may not be available): {e}"
-    )
+_logger = logging.getLogger(__name__)
+
+for _name, _module, _prefix, _tags in [
+    ("complexes", "routers.complexes", "/api/complexes", ["complexes"]),
+    ("jobs",      "routers.jobs",      "/api/jobs",      ["jobs"]),
+    ("runs",      "routers.runs",      "/api/runs",      ["runs"]),
+    ("data",      "routers.data_explorer", "/api/data",  ["data_explorer"]),
+    ("batches",   "routers.batches",   "/api/batches",   ["batches"]),
+]:
+    try:
+        _mod = importlib.import_module(_module)
+        app.include_router(_mod.router, prefix=_prefix, tags=_tags)
+    except Exception as _e:
+        _logger.warning(f"Router '{_name}' load failed (skipped): {_e}")
 
 
 # --- Database table creation on startup ---
@@ -48,6 +48,27 @@ def on_startup():
         from core.database import engine
         from models import Base
         Base.metadata.create_all(bind=engine)
+
+        # 기존 테이블에 새 컬럼 자동 추가 (create_all은 기존 테이블에 컬럼 추가 안함)
+        from sqlalchemy import inspect, text
+        inspector = inspect(engine)
+        if "complexes" in inspector.get_table_names():
+            existing = {c["name"] for c in inspector.get_columns("complexes")}
+            migrations = [
+                ("total_households", "INTEGER"),
+                ("corridor_type", "VARCHAR(50)"),
+                ("build_year", "INTEGER"),
+            ]
+            with engine.begin() as conn:
+                for col_name, col_type in migrations:
+                    if col_name not in existing:
+                        conn.execute(text(
+                            f"ALTER TABLE complexes ADD COLUMN {col_name} {col_type}"
+                        ))
+                        import logging
+                        logging.getLogger(__name__).info(
+                            f"Added column complexes.{col_name}"
+                        )
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(
@@ -214,8 +235,21 @@ def register_monitoring_loan(request: MonitoringRegisterRequest):
 
 # === 분석 API ===
 
+def _get_db_optional():
+    """분석용 DB 세션 (DB 미연결 시에도 동작하도록 Optional)"""
+    try:
+        from core.database import get_db
+        db = next(get_db())
+        try:
+            yield db
+        finally:
+            db.close()
+    except Exception:
+        yield None
+
+
 @app.post("/api/analyze", response_model=AnalysisResponse)
-def analyze_property(request: AnalysisRequest):
+def analyze_property(request: AnalysisRequest, db=Depends(_get_db_optional)):
     """대출 담보 분석 엔드포인트"""
     search_history.add_company(request.company_name)
     search_history.add_address(request.property_address)
@@ -223,5 +257,6 @@ def analyze_property(request: AnalysisRequest):
     return perform_full_analysis(
         company_name=request.company_name,
         property_address=request.property_address,
-        loan_amount=request.loan_amount
+        loan_amount=request.loan_amount,
+        db=db,
     )

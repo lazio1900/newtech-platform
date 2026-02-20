@@ -17,6 +17,9 @@ export interface Complex {
   priority: PriorityLevel
   is_active: boolean
   collect_listings: boolean
+  total_households: number | null
+  corridor_type: string | null
+  build_year: number | null
   areas: Area[]
 }
 
