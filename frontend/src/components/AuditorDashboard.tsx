@@ -16,21 +16,26 @@ import NearbyPropertyList from './NearbyPropertyList';
 import PricePerPyeongChart from './PricePerPyeongChart';
 import LtvCalculation from './LtvCalculation';
 import AiComprehensiveOpinion from './AiComprehensiveOpinion';
-import CollectorDashboard from './collector/CollectorDashboard';
-import RunList from './collector/RunList';
-import DataExplorer from './collector/DataExplorer';
 import { analyzeProperty } from '@/api/analysis';
 import { getApplications, updateApplicationStatus } from '@/api/applications';
 import { addMonitoringLoan } from '@/api/monitoring';
 import type { User, LoanApplication, AnalysisResponse } from '@/types/loan';
 import './AuditorDashboard.css';
 
-type ActiveTab = 'dashboard' | 'direct' | 'applications' | 'monitoring' | 'collector' | 'runs' | 'dataExplorer';
+type ActiveTab = 'dashboard' | 'direct' | 'applications' | 'monitoring';
 
 interface AuditorDashboardProps {
   user: User;
   onLogout: () => void;
 }
+
+const STATUS_COLOR: Record<string, string> = {
+  '접수완료': '#006FBD',
+  '심사중': '#051C48',
+  '승인': '#20c997',
+  '반려': '#EF5350',
+  '보류': '#9CA3AF',
+};
 
 export default function AuditorDashboard({ user, onLogout }: AuditorDashboardProps) {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -102,7 +107,13 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
       const response = await analyzeProperty(
         app.company_name,
         app.property_address,
-        app.loan_amount
+        app.loan_amount,
+        {
+          complexId: app.complex_id ?? null,
+          areaId: app.area_id ?? null,
+          complexName: app.complex_name ?? null,
+          pyeong: app.pyeong ?? null,
+        },
       );
       setAppAnalysisData(response);
     } catch (err) {
@@ -268,7 +279,6 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
               handleStatusUpdate(selectedApp.id, '승인');
               try {
                 await addMonitoringLoan({
-                  auditor_name: user.ceo_name || user.user_id,
                   company_name: data.borrower_info.company_name,
                   ceo_name: selectedApp.ceo_name,
                   property_address: data.property_basic_info.address,
@@ -342,14 +352,14 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                       <tr>
                         <th>전용면적</th>
                         <td>{data.property_basic_info.area != null ? `${data.property_basic_info.area}평` : "N/A"}</td>
-                        <th>복도타입</th>
-                        <td>{data.property_basic_info.corridor_type ?? "N/A"}</td>
-                      </tr>
-                      <tr>
                         <th>세대수</th>
                         <td>{data.property_basic_info.units != null ? `${data.property_basic_info.units.toLocaleString()}세대` : "N/A"}</td>
+                      </tr>
+                      <tr>
                         <th>경과연수</th>
                         <td>{data.property_basic_info.age != null ? `${data.property_basic_info.age}년` : "N/A"}</td>
+                        <th></th>
+                        <td></td>
                       </tr>
                       <tr>
                         <th>입지점수</th>
@@ -399,7 +409,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                         <th>성명</th>
                         <td>{data.guarantor_info.name}</td>
                         <th>신용점수</th>
-                        <td>{data.guarantor_info.credit_score}점</td>
+                        <td>{data.guarantor_info.credit_score_kcb}점</td>
                       </tr>
                       <tr>
                         <th>직접채무</th>
@@ -743,35 +753,6 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
           >
             사후모니터링
           </button>
-          <div className="sidebar-divider" />
-          <div className="sidebar-submenu-wrapper">
-            <button
-              className={`sidebar-btn ${activeTab === 'collector' || activeTab === 'runs' || activeTab === 'dataExplorer' ? 'active' : ''}`}
-            >
-              데이터 수집 허브
-              <span className="sidebar-submenu-arrow">&#9654;</span>
-            </button>
-            <div className="sidebar-submenu">
-              <button
-                className={`sidebar-submenu-btn ${activeTab === 'collector' ? 'active' : ''}`}
-                onClick={() => setActiveTab('collector')}
-              >
-                데이터 수집 관리
-              </button>
-              <button
-                className={`sidebar-submenu-btn ${activeTab === 'runs' ? 'active' : ''}`}
-                onClick={() => setActiveTab('runs')}
-              >
-                수집 실행 이력
-              </button>
-              <button
-                className={`sidebar-submenu-btn ${activeTab === 'dataExplorer' ? 'active' : ''}`}
-                onClick={() => setActiveTab('dataExplorer')}
-              >
-                시세 데이터 탐색
-              </button>
-            </div>
-          </div>
         </nav>
 
         <div className="dashboard-content">
@@ -942,22 +923,64 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
             ) : (
               <div className="app-detail">
                 <div className="app-detail-header">
-                  <button
-                    className="back-to-list-btn"
-                    onClick={() => { setSelectedApp(null); setAppAnalysisData(null); }}
-                  >
-                    목록으로 돌아가기
-                  </button>
-                  <div className="app-detail-info">
-                    <span>신청번호: <strong>{selectedApp.id}</strong></span>
-                    <span>업체: <strong>{selectedApp.company_name}</strong></span>
-                    <span>대표: <strong>{selectedApp.ceo_name}</strong></span>
-                    <span>신청금액: <strong>{formatAmount(selectedApp.loan_amount)}</strong></span>
-                    <span>금리: <strong>7.5%</strong></span>
-                    <span>대출기간: <strong>{selectedApp.loan_duration}개월</strong></span>
-                    <span style={getStatusBadge(selectedApp.status)}>
+                  <div className="app-detail-topbar">
+                    <button
+                      className="back-to-list-btn"
+                      onClick={() => { setSelectedApp(null); setAppAnalysisData(null); }}
+                    >
+                      ← 목록
+                    </button>
+                    <span className="app-detail-id">신청번호 <strong>{selectedApp.id}</strong></span>
+                    <span className="app-detail-status status-badge"
+                          style={{ backgroundColor: STATUS_COLOR[selectedApp.status] || '#999' }}>
                       {selectedApp.status}
                     </span>
+                  </div>
+
+                  <div className="app-detail-property">
+                    <div className="property-primary">
+                      {selectedApp.complex_name && (
+                        <span className="property-complex">{selectedApp.complex_name}</span>
+                      )}
+                      {selectedApp.exclusive_m2 != null && (
+                        <span className="property-meta">
+                          {selectedApp.exclusive_m2.toFixed(0)}㎡
+                          {selectedApp.pyeong ? ` (${selectedApp.pyeong}평)` : ''}
+                        </span>
+                      )}
+                      {(selectedApp.dong || selectedApp.ho) && (
+                        <span className="property-meta">
+                          {[selectedApp.dong, selectedApp.ho].filter(Boolean).join(' ')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="property-address">{selectedApp.property_address}</div>
+                  </div>
+
+                  <div className="app-detail-loan">
+                    <div className="loan-info-cell">
+                      <span className="loan-info-label">신청업체</span>
+                      <span className="loan-info-value">
+                        {selectedApp.company_name}
+                        <span className="loan-info-sub"> · {selectedApp.ceo_name}</span>
+                      </span>
+                    </div>
+                    <div className="loan-info-cell">
+                      <span className="loan-info-label">신청금액</span>
+                      <span className="loan-info-value strong">{formatAmount(selectedApp.loan_amount)}</span>
+                    </div>
+                    <div className="loan-info-cell">
+                      <span className="loan-info-label">적용금리</span>
+                      <span className="loan-info-value">7.5%</span>
+                    </div>
+                    <div className="loan-info-cell">
+                      <span className="loan-info-label">대출기간</span>
+                      <span className="loan-info-value">{selectedApp.loan_duration}개월</span>
+                    </div>
+                    <div className="loan-info-cell">
+                      <span className="loan-info-label">신청일시</span>
+                      <span className="loan-info-value">{selectedApp.created_at}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -979,21 +1002,6 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
         {/* 사후모니터링 탭 */}
         {activeTab === 'monitoring' && (
           <MonitoringTab />
-        )}
-
-        {/* 데이터 수집 관리 탭 */}
-        {activeTab === 'collector' && (
-          <CollectorDashboard />
-        )}
-
-        {/* 수집 실행 이력 탭 */}
-        {activeTab === 'runs' && (
-          <RunList />
-        )}
-
-        {/* 시세 데이터 탐색 탭 */}
-        {activeTab === 'dataExplorer' && (
-          <DataExplorer />
         )}
         </div>
       </div>

@@ -22,8 +22,8 @@ from services.real_data_service import get_real_market_data
 
 logger = logging.getLogger(__name__)
 
-# TODO: Claude API 연동 시 아래 주석 해제
-# from services.claude_service import ClaudeClient
+# TODO: Phase 3에서 LLM 실연동. 활성화 시 아래 주석 해제 (ADR-008).
+# from services.llm_service import LLMClient
 # from utils.prompts import (
 #     format_property_prompt,
 #     format_rights_prompt,
@@ -38,11 +38,15 @@ def _build_real_property_basic_info(
 ) -> PropertyBasicInfo:
     """DB의 Complex/Area 데이터로 담보 물건 기초 정보를 구성한다."""
     units = complex_obj.total_households  # None이면 N/A
-    corridor_type = complex_obj.corridor_type  # None이면 N/A
+    corridor_type = complex_obj.hallway_type  # newtech_data 컬럼명: hallway_type
 
+    # built_year 는 VARCHAR — "1999", "1999.11" 등 → 앞 4자리만 추출
     age = None
-    if complex_obj.build_year:
-        age = date.today().year - complex_obj.build_year
+    if complex_obj.built_year:
+        try:
+            age = date.today().year - int(str(complex_obj.built_year)[:4])
+        except (ValueError, TypeError):
+            age = None
 
     area_pyeong = None
     if area_obj:
@@ -53,7 +57,8 @@ def _build_real_property_basic_info(
 
     # location_score는 DB에 없음 (지리 API 필요) → None (N/A)
     return PropertyBasicInfo(
-        address=complex_obj.address or property_address,
+        complex_name=complex_obj.name,
+        address=property_address or complex_obj.address,
         units=units,
         corridor_type=corridor_type,
         age=age,
@@ -67,8 +72,16 @@ def perform_full_analysis(
     property_address: str,
     loan_amount: int,
     db: Optional[Session] = None,
+    target_pyeong: Optional[int] = None,
+    complex_id: Optional[int] = None,
+    area_id: Optional[int] = None,
+    complex_name: Optional[str] = None,
 ) -> AnalysisResponse:
-    """전체 분석 수행 - 실 수집 데이터 우선, 없으면 더미 폴백"""
+    """전체 분석 수행 - 실 수집 데이터 우선, 없으면 더미 폴백.
+
+    complex_id/area_id 가 주어지면 fuzzy 매칭 대신 직접 조회 (정확함).
+    complex_name 은 dummy 폴백 시 단지명 표시에 사용.
+    """
 
     # 0. 실 수집 데이터 조회 시도
     real_data = None
@@ -85,7 +98,13 @@ def perform_full_analysis(
 
     if db is not None:
         try:
-            real_data = get_real_market_data(db, property_address)
+            real_data = get_real_market_data(
+                db,
+                property_address,
+                target_pyeong=target_pyeong,
+                complex_id=complex_id,
+                area_id=area_id,
+            )
         except Exception as e:
             logger.warning(f"실 데이터 조회 실패, 더미 폴백: {e}")
             real_data = None
@@ -93,7 +112,7 @@ def perform_full_analysis(
             if should_close_db:
                 db.close()
 
-    # 담보 물건 기초 정보: 실 DB 우선, 없으면 더미
+    # 담보 물건 기초 정보: 실 DB 우선, 없으면 더미 (입력값만 채우고 나머지 N/A)
     if real_data and real_data.get("complex"):
         property_basic_info = _build_real_property_basic_info(
             real_data["complex"],
@@ -101,12 +120,16 @@ def perform_full_analysis(
             property_address,
         )
     else:
-        property_basic_info = generate_property_basic_info(property_address)
+        property_basic_info = generate_property_basic_info(
+            property_address,
+            complex_name=complex_name,
+            pyeong=target_pyeong,
+        )
 
     # 1. 더미 데이터 생성 (실 데이터 없는 항목만)
     borrower_info = generate_borrower_info(company_name)
     guarantor_info = generate_guarantor_info()
-    property_rights_info = generate_property_rights_info()
+    property_rights_info = generate_property_rights_info(property_address)
 
     # 시세 데이터: 실 데이터 우선, 없으면 더미
     credit_data = (
@@ -160,13 +183,13 @@ def perform_full_analysis(
         elif diff < 0:
             pyeong_direction = "하락"
 
-    # TODO: Claude API 연동 시 아래 하드코딩 comprehensive_opinion을 삭제하고
+    # TODO: LLM API 연동 시 아래 하드코딩 comprehensive_opinion을 삭제하고
     #       프롬프트 기반 API 호출로 교체
     # comprehensive_prompt = format_comprehensive_prompt(
     #     property_basic_info, property_rights_info, credit_data,
     #     nearby_trends, price_per_pyeong, loan_amount, ltv_current, ltv_jb
     # )
-    # comprehensive_opinion = claude_client.analyze(comprehensive_prompt)
+    # comprehensive_opinion = llm_client.analyze(comprehensive_prompt)
     # 가압류 존재 여부 확인 (갑구 기타사항에서)
     has_seizure = any(
         '가압류' in (e.get('purpose', '') if isinstance(e, dict) else getattr(e, 'purpose', ''))
@@ -183,7 +206,7 @@ def perform_full_analysis(
 [LTV] 선순위 채권 + 대출신청금액 합산 기준 현재 시세 LTV {ltv_current}%, JB 적정시세 LTV {ltv_jb}%로 {'사내 기준 이내로 대출 실행 가능합니다.' if ltv_jb <= 85 else '사내 기준 초과 가능성이 있어 한도 조정 검토가 필요합니다.'}"""
 
     # 3. AI 분석 (하드코딩)
-    # TODO: Claude API 연동 시 아래 하드코딩 블록을 삭제하고 API 호출 블록으로 교체
+    # TODO: LLM API 연동 시 아래 하드코딩 블록을 삭제하고 API 호출 블록으로 교체
     ai_analysis = AIAnalysis(
         comprehensive_opinion=comprehensive_opinion,
 
@@ -253,15 +276,15 @@ def perform_full_analysis(
   - 시세 안정성은 '양호'하며, 담보가치 대비 적정 대출 비율 내에서 대출 실행이 가능할 것으로 판단됩니다."""
     )
 
-    # TODO: Claude API 연동 시 아래 블록 주석 해제
+    # TODO: LLM API 연동 시 아래 블록 주석 해제
     # try:
-    #     claude_client = ClaudeClient()
+    #     llm_client = LLMClient()
     #     property_prompt = format_property_prompt(property_basic_info, property_address)
     #     rights_prompt = format_rights_prompt(property_rights_info)
     #     market_prompt = format_market_prompt(credit_data, loan_amount)
-    #     property_analysis = claude_client.analyze_property(property_prompt)
-    #     rights_analysis = claude_client.analyze_rights(rights_prompt)
-    #     market_analysis = claude_client.analyze_market(market_prompt)
+    #     property_analysis = llm_client.analyze_property(property_prompt)
+    #     rights_analysis = llm_client.analyze_rights(rights_prompt)
+    #     market_analysis = llm_client.analyze_market(market_prompt)
     #     ai_analysis = AIAnalysis(
     #         property_analysis=property_analysis,
     #         rights_analysis=rights_analysis,

@@ -12,14 +12,22 @@ export interface Complex {
   id: number
   name: string
   address: string
+  road_address?: string | null
   region_code: string | null
+  dong_code?: string | null
+  dong_name?: string | null
   kb_complex_id: string | null
   priority: PriorityLevel
   is_active: boolean
   collect_listings: boolean
   total_households: number | null
-  corridor_type: string | null
-  build_year: number | null
+  hallway_type?: string | null
+  built_year?: string | null
+  total_buildings?: number | null
+  max_floor?: number | null
+  total_parking?: number | null
+  heating_type?: string | null
+  builder?: string | null
   areas: Area[]
 }
 

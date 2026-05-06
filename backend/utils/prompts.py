@@ -1,4 +1,4 @@
-"""Claude AI 분석용 프롬프트 템플릿"""
+"""LLM(OpenAI ChatCompletion) 분석용 프롬프트 템플릿"""
 
 
 PROPERTY_ANALYSIS_PROMPT = """당신은 부동산 담보대출 심사를 위한 입지 분석 전문가입니다.

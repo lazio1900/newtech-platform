@@ -31,6 +31,7 @@ class GuarantorInfo(BaseModel):
 
 class PropertyBasicInfo(BaseModel):
     """담보 물건 기초 정보"""
+    complex_name: Optional[str] = None
     units: Optional[int] = None
     corridor_type: Optional[str] = None
     age: Optional[int] = None

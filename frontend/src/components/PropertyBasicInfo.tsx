@@ -11,6 +11,12 @@ export default function PropertyBasicInfo({ data }: PropertyBasicInfoProps) {
     <div className="info-card">
       <h3>담보 물건 기초 정보 조회 영역</h3>
       <div className="info-content">
+        {data.complex_name && (
+          <div className="info-row">
+            <span className="label">단지명:</span>
+            <span className="value"><strong>{data.complex_name}</strong></span>
+          </div>
+        )}
         <div className="info-row">
           <span className="label">주소:</span>
           <span className="value">{data.address}</span>
@@ -18,10 +24,6 @@ export default function PropertyBasicInfo({ data }: PropertyBasicInfoProps) {
         <div className="info-row">
           <span className="label">세대수:</span>
           <span className="value">{data.units != null ? `${data.units.toLocaleString()}세대` : "N/A"}</span>
-        </div>
-        <div className="info-row">
-          <span className="label">복도타입:</span>
-          <span className="value">{data.corridor_type ?? "N/A"}</span>
         </div>
         <div className="info-row">
           <span className="label">연식:</span>

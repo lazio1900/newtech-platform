@@ -7,6 +7,7 @@ DB에 저장된 KB 시세/실거래/매물 데이터를 조회하여
 """
 
 import logging
+import re
 from datetime import date, timedelta
 from typing import Optional, List
 
@@ -36,15 +37,38 @@ HISTORY_DAYS = 90  # 최근 3개월
 # 1. 주소 → Complex 매칭
 # ──────────────────────────────────────────────
 
+# 지역명 블랙리스트 — 단지명으로 인정 안 함 (단지명에 우연히 포함된 광역명 매칭 차단)
+_LOCATION_BLACKLIST = {
+    "서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종",
+    "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
+    "강남", "강북", "강동", "강서", "관악", "광진", "구로", "금천", "노원",
+    "도봉", "동대문", "동작", "마포", "서대문", "서초", "성동", "성북", "송파",
+    "양천", "영등포", "용산", "은평", "종로", "중구", "중랑",
+}
+
+_ADDR_SUFFIXES = ("시", "도", "구", "동", "읍", "면", "리", "로", "길")
+
+
+def _last_meaningful_token(tokens: list) -> str:
+    """입력 토큰들 중 동·호·번지 같은 마커 제외하고 마지막 의미있는 토큰 반환."""
+    skip_re = re.compile(r"^[\d\-]+(동|호|층|번지)?$|^\d+$")
+    for t in reversed(tokens):
+        if skip_re.match(t):
+            continue
+        if t.endswith(_ADDR_SUFFIXES) and len(t) <= 3:
+            continue
+        return t
+    return tokens[-1] if tokens else ""
+
+
 def resolve_complex(db: Session, property_address: str) -> Optional[Complex]:
     """
     property_address를 Complex 레코드에 매칭한다.
 
-    전략:
-      1) 정확 매칭 (Complex.address == property_address)
-      2) 토큰 기반 ILIKE 검색 (양방향: 토큰⊂이름, 이름⊂토큰)
-      3) 입력 부분문자열로 이름 검색 (아파트/단지명 추출)
-      4) 점수 기반 최적 후보 선택
+    엄격 규칙:
+      - 단지명이 입력의 의미있는 토큰 중 하나와 prefix/exact로 일치할 때만 매칭
+      - 광역명("서울", "강남" 등)은 단지명으로 인정 안 함 (블랙리스트)
+      - 단지명 길이 2 미만은 매칭 안 함
     """
     addr = property_address.strip()
     if not addr:
@@ -56,57 +80,58 @@ def resolve_complex(db: Session, property_address: str) -> Optional[Complex]:
         logger.info(f"[resolve] 정확 매칭: {exact.name} (id={exact.id})")
         return exact
 
-    # 2단계: 토큰 분리 후 ILIKE 검색 (양방향)
-    tokens = addr.replace(",", " ").split()
-    meaningful_tokens = [t for t in tokens if len(t) >= 2]
-
-    conditions = []
-    for token in meaningful_tokens:
-        # 정방향: 토큰이 이름/주소에 포함 (예: "영등포구" in name)
-        conditions.append(Complex.name.ilike(f"%{token}%"))
-        conditions.append(Complex.address.ilike(f"%{token}%"))
-
-    # 역방향: 단지 이름이 입력 주소에 포함되는지 확인
-    # 예: name="양평동6차현대"가 "양평동6차현대아파트 606동"에 포함
-    # SQL: addr LIKE '%' || name || '%'
-    from sqlalchemy import literal
-    conditions.append(
-        literal(addr).ilike(func.concat('%', Complex.name, '%'))
-    )
-
-    if not conditions:
+    # 토큰 분리 + 의미있는 토큰만
+    tokens = [t for t in addr.replace(",", " ").split() if len(t) >= 2]
+    meaningful_tokens = [
+        t for t in tokens
+        if not (t.endswith(_ADDR_SUFFIXES) and len(t) <= 3)
+        and t not in _LOCATION_BLACKLIST
+    ]
+    if not meaningful_tokens:
         return None
 
-    candidates = db.query(Complex).filter(or_(*conditions)).all()
-    logger.info(f"[resolve] 주소='{addr}' → 후보 {len(candidates)}개")
+    last_token = _last_meaningful_token(tokens)
+
+    # 2단계: 단지명 후보 조회 — 마지막 의미 토큰의 prefix 일치 단지 우선
+    from sqlalchemy import literal
+
+    name_conditions = []
+    # 역방향: 단지명 ⊂ 입력주소
+    name_conditions.append(literal(addr).ilike(func.concat("%", Complex.name, "%")))
+    # 정방향: 입력 의미 토큰이 단지명에 포함
+    for tok in meaningful_tokens:
+        name_conditions.append(Complex.name.ilike(f"%{tok}%"))
+
+    candidates = db.query(Complex).filter(or_(*name_conditions)).all()
+    logger.info(
+        f"[resolve] 주소='{addr}' last_token='{last_token}' → 후보 {len(candidates)}개"
+    )
 
     if not candidates:
         return None
 
-    if len(candidates) == 1:
-        logger.info(f"[resolve] 단일 후보: {candidates[0].name} (id={candidates[0].id})")
-        return candidates[0]
-
     # 3단계: 점수 기반 최적 후보 선택
-    # 토큰 길이 가중치로 구체적인 토큰("영등포구", "선유로")이
-    # 짧은 토큰("서울")보다 높은 점수를 받도록 함
     def score(c: Complex) -> int:
+        name = (c.name or "").strip()
+        if len(name) < 2 or name in _LOCATION_BLACKLIST:
+            return -1
+
         s = 0
-        name = c.name or ""
-        c_addr = c.address or ""
 
-        # 역방향 매칭: 단지명이 입력 주소에 포함 (가장 강력한 신호)
-        if name and name in addr:
-            s += 50 + len(name)
+        # (a) 단지명이 마지막 의미 토큰의 prefix → 가장 강력
+        if last_token and last_token.startswith(name):
+            s += 100 + len(name) * 5
+        # (b) 단지명이 마지막 토큰 자체 (정확 일치, 광역명 제외했으니 안전)
+        elif name == last_token:
+            s += 80 + len(name) * 5
+        # (c) 단지명이 입력 주소에 substring (단어 경계 무시)
+        elif name in addr:
+            s += 30 + len(name) * 2
 
-        for token in meaningful_tokens:
-            w = len(token)  # 긴 토큰 = 더 구체적 = 높은 가중치
-            # 정방향: 토큰이 단지명에 포함
-            if token in name:
-                s += w * 2
-            # 정방향: 토큰이 DB 주소에 포함
-            if token in c_addr:
-                s += w
+        # (d) 의미 토큰 중 단지명에 포함되는 것 가산
+        for tok in meaningful_tokens:
+            if tok != name and tok in name:
+                s += len(tok)
 
         return s
 
@@ -114,11 +139,13 @@ def resolve_complex(db: Session, property_address: str) -> Optional[Complex]:
     best = candidates[0]
     best_score = score(best)
 
-    if best_score > 0:
-        logger.info(f"[resolve] 최적 매칭: {best.name} (id={best.id}, score={best_score})")
-        return best
+    MIN_SCORE = 30  # (c) 이상이어야 인정
+    if best_score < MIN_SCORE:
+        logger.info(f"[resolve] 점수 미달 ({best_score} < {MIN_SCORE}) → 매칭 실패")
+        return None
 
-    return None
+    logger.info(f"[resolve] 최적 매칭: {best.name} (id={best.id}, score={best_score})")
+    return best
 
 
 # ──────────────────────────────────────────────
@@ -448,7 +475,12 @@ def build_real_nearby_trends(
         sigungu = parts[1] if len(parts) > 1 else ""
 
         sim_units = c.total_households or 0
-        sim_age = (date.today().year - c.build_year) if c.build_year else 0
+        sim_age = 0
+        if c.built_year:
+            try:
+                sim_age = date.today().year - int(str(c.built_year)[:4])
+            except (ValueError, TypeError):
+                sim_age = 0
 
         similar_properties.append(
             SimilarProperty(
@@ -646,19 +678,19 @@ def get_real_market_data(
     db: Session,
     property_address: str,
     target_pyeong: Optional[int] = None,
+    complex_id: Optional[int] = None,
+    area_id: Optional[int] = None,
 ) -> dict:
     """
     실 수집 데이터를 종합적으로 조회한다.
 
-    반환값:
-        {
-            "complex": Complex | None,
-            "area": Area | None,
-            "credit_data": CreditData | None,
-            "nearby_trends": NearbyPropertyTrends | None,
-            "price_per_pyeong": PricePerPyeongTrend | None,
-        }
+    매칭 우선순위:
+      1) complex_id 가 주어지면 그 단지를 직접 조회 (가장 정확)
+      2) area_id 가 주어지면 그 평형을 직접 사용
+      3) 둘 다 없으면 property_address 로 fuzzy 매칭
 
+    반환값:
+        {complex, area, credit_data, nearby_trends, price_per_pyeong}.
     각 값이 None이면 호출측에서 더미 데이터로 폴백한다.
     """
     result = {
@@ -669,15 +701,36 @@ def get_real_market_data(
         "price_per_pyeong": None,
     }
 
-    complex_obj = resolve_complex(db, property_address)
+    complex_obj: Optional[Complex] = None
+
+    # 1) ID 기반 직접 조회
+    if complex_id is not None:
+        complex_obj = db.query(Complex).filter(Complex.id == complex_id).first()
+        if complex_obj:
+            logger.info(f"[real_data] complex_id={complex_id} → {complex_obj.name}")
+        else:
+            logger.warning(f"[real_data] complex_id={complex_id} not found in DB")
+
+    # 2) ID 매칭 실패 또는 미제공 시 주소 기반 fuzzy
+    if not complex_obj:
+        complex_obj = resolve_complex(db, property_address)
+
     if not complex_obj:
         logger.info(f"No complex found for address: {property_address}")
         return result
 
     result["complex"] = complex_obj
-    logger.info(f"Matched complex: {complex_obj.name} (id={complex_obj.id})")
 
-    area_obj = resolve_area(db, complex_obj, target_pyeong)
+    # area: ID 우선
+    area_obj: Optional[Area] = None
+    if area_id is not None:
+        area_obj = (
+            db.query(Area)
+            .filter(Area.id == area_id, Area.complex_id == complex_obj.id)
+            .first()
+        )
+    if not area_obj:
+        area_obj = resolve_area(db, complex_obj, target_pyeong)
     result["area"] = area_obj
 
     if area_obj:

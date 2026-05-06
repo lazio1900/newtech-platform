@@ -1,5 +1,6 @@
 // 담보 물건 기초 정보
 export interface PropertyBasicData {
+  complex_name?: string | null;
   address: string;
   units: number | null;
   corridor_type: string | null;
@@ -120,14 +121,26 @@ export interface User {
 // 대출 신청
 export interface LoanApplication {
   id: string;
-  applicant_id?: string;
+  applicant_user_id?: number;
+  auditor_user_id?: number | null;
   company_name: string;
   ceo_name: string;
   property_address: string;
   loan_amount: number;
   loan_duration: number;
   status: string;
+  status_value?: string;
+  // 단지/평형 매칭 (없으면 null)
+  complex_id?: number | null;
+  complex_name?: string | null;
+  area_id?: number | null;
+  exclusive_m2?: number | null;
+  pyeong?: number | null;
+  dong?: string | null;
+  ho?: string | null;
+  memo?: string | null;
   created_at: string;
+  decided_at?: string | null;
 }
 
 // KB 시세 이력 포인트

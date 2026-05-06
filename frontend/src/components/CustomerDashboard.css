@@ -1,6 +1,6 @@
 .customer-dashboard {
   min-height: 100vh;
-  background-color: #F5F5F5;
+  background-color: #F5F7FA;
 }
 
 .dashboard-header {
@@ -120,29 +120,40 @@
 
 .customer-dashboard .dashboard-content {
   flex: 1;
-  max-width: 900px;
+  max-width: 960px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 32px 24px;
 }
 
-/* 신청 폼 */
+/* ---------- 신청 폼 ---------- */
+
 .apply-card {
   background-color: #FFFFFF;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  padding: 32px;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(5, 28, 72, 0.06);
+  padding: 36px;
 }
 
 .apply-card h2 {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
-  color: #333333;
-  margin-bottom: 24px;
+  color: #051C48;
+  margin: 0 0 8px 0;
+  letter-spacing: -0.3px;
 }
 
-.apply-info-box,
-.apply-form-box {
-  margin-bottom: 24px;
+.apply-card .apply-subtitle {
+  font-size: 13px;
+  color: #6B7785;
+  margin-bottom: 28px;
+}
+
+.apply-info-box {
+  margin-bottom: 28px;
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #F5F9FD 0%, #EEF4FB 100%);
+  border-radius: 10px;
+  border: 1px solid #E0EAF4;
 }
 
 .apply-info-box h3,
@@ -150,15 +161,20 @@
   font-size: 14px;
   font-weight: 700;
   color: #051C48;
-  margin-bottom: 16px;
+  margin: 0 0 14px 0;
   padding-bottom: 8px;
-  border-bottom: 2px solid #E0E0E0;
+  border-bottom: 2px solid #006FBD;
+  display: inline-block;
+}
+
+.apply-form-box h3 {
+  margin-bottom: 18px;
 }
 
 .info-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 14px 24px;
 }
 
 .info-item {
@@ -169,132 +185,284 @@
 
 .info-label {
   font-size: 12px;
-  color: #999999;
+  color: #8898A8;
   font-weight: 500;
 }
 
 .info-value {
   font-size: 14px;
-  color: #333333;
+  color: #1F2A3C;
   font-weight: 500;
 }
 
+.apply-form-box {
+  margin-bottom: 28px;
+}
+
+/* 폼 필드 공통 */
 .apply-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 18px;
 }
 
 .apply-field label {
-  font-weight: 500;
-  font-size: 14px;
-  color: #333333;
+  font-weight: 600;
+  font-size: 13px;
+  color: #344458;
+  letter-spacing: -0.1px;
 }
 
-.apply-field input {
-  padding: 12px 14px;
-  border: 1px solid #E0E0E0;
-  border-radius: 4px;
+.apply-field input,
+.apply-field select {
+  padding: 11px 14px;
+  border: 1px solid #D6DEE8;
+  border-radius: 6px;
   font-size: 14px;
   font-family: 'Noto Sans KR', sans-serif;
+  background-color: #FFFFFF;
+  color: #1F2A3C;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.apply-field input:focus {
+.apply-field input::placeholder {
+  color: #B0BAC5;
+}
+
+.apply-field input:focus,
+.apply-field select:focus {
   outline: none;
   border-color: #006FBD;
+  box-shadow: 0 0 0 3px rgba(0, 111, 189, 0.12);
+}
+
+.apply-field input:disabled,
+.apply-field input[readonly] {
+  background-color: #F5F7FA;
+  color: #6B7785;
+  cursor: not-allowed;
 }
 
 .apply-amount-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .apply-amount-row input {
   flex: 1;
-  padding: 12px 14px;
-  border: 1px solid #E0E0E0;
-  border-radius: 4px;
-  font-size: 14px;
-  font-family: 'Noto Sans KR', sans-serif;
-}
-
-.apply-amount-row input:focus {
-  outline: none;
-  border-color: #006FBD;
 }
 
 .apply-amount-row .unit {
-  font-size: 14px;
-  color: #666666;
+  font-size: 13px;
+  color: #6B7785;
+  font-weight: 500;
+  min-width: 24px;
 }
 
 .rate-input-readonly {
-  background-color: #F5F5F5 !important;
-  color: #666666 !important;
+  background-color: #F5F7FA !important;
+  color: #6B7785 !important;
   cursor: not-allowed;
 }
 
 .duration-select {
   flex: 1;
-  padding: 12px;
-  border: 1px solid #E0E0E0;
-  border-radius: 4px;
-  font-size: 14px;
-  font-family: 'Noto Sans KR', sans-serif;
-  color: #333333;
-  background-color: #FFFFFF;
 }
 
-.duration-select:focus {
-  outline: none;
-  border-color: #006FBD;
+/* 주소 검색 */
+.address-input-row {
+  display: flex;
+  gap: 8px;
 }
 
-.submit-btn {
-  width: 100%;
-  padding: 14px;
-  background-color: #006FBD;
+.address-input-row input {
+  flex: 1;
+}
+
+.address-search-btn {
+  padding: 10px 18px;
+  background-color: #051C48;
   color: #FFFFFF;
   border: none;
   border-radius: 6px;
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   font-family: 'Noto Sans KR', sans-serif;
-  transition: background-color 0.2s;
-  margin-top: 8px;
+  transition: background-color 0.15s;
+  white-space: nowrap;
 }
 
-.submit-btn:hover:not(:disabled) {
-  background-color: #005A9E;
+.address-search-btn:hover:not(:disabled) {
+  background-color: #0A2A6A;
 }
 
-.submit-btn:disabled {
-  background-color: #CCCCCC;
+.address-search-btn:disabled {
+  background-color: #B0BAC5;
   cursor: not-allowed;
 }
 
-/* 신청 내역 */
+/* 매칭 상태 배지 */
+.match-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.match-status.loading {
+  background-color: #F5F7FA;
+  color: #6B7785;
+}
+
+.match-status.success {
+  background-color: #E5F8EC;
+  color: #0A7A3B;
+}
+
+.match-status.warning {
+  background-color: #FFF6E0;
+  color: #A25C00;
+}
+
+.match-status .badge-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.match-status .badge-extra {
+  color: #6B7785;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: #6B7785;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 18px;
+}
+
+.field-hint strong {
+  color: #1F2A3C;
+}
+
+/* 후보 단지 드롭다운 라벨 */
+.candidates-label {
+  font-size: 12px;
+  color: #6B7785;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+/* 등록 평형 빠른 선택 칩 */
+.area-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.area-chips-label {
+  font-size: 12px;
+  color: #8898A8;
+  margin-right: 4px;
+}
+
+.area-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background-color: #FFFFFF;
+  border: 1px solid #D6DEE8;
+  border-radius: 999px;
+  font-size: 12px;
+  color: #006FBD;
+  cursor: pointer;
+  font-family: 'Noto Sans KR', sans-serif;
+  transition: all 0.15s;
+}
+
+.area-chip:hover:not(:disabled) {
+  background-color: #EEF4FB;
+  border-color: #006FBD;
+}
+
+.area-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 동/호 grid */
+.dong-ho-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* 신청 버튼 */
+.submit-btn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #006FBD 0%, #005A9E 100%);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Noto Sans KR', sans-serif;
+  transition: transform 0.1s, box-shadow 0.15s;
+  margin-top: 12px;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 8px rgba(0, 111, 189, 0.25);
+}
+
+.submit-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 111, 189, 0.35);
+}
+
+.submit-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.submit-btn:disabled {
+  background: #B0BAC5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ---------- 신청 내역 ---------- */
 .history-card {
   background-color: #FFFFFF;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(5, 28, 72, 0.06);
   padding: 32px;
 }
 
 .history-card h2 {
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 700;
-  color: #333333;
-  margin-bottom: 24px;
+  color: #051C48;
+  margin: 0 0 24px 0;
+  letter-spacing: -0.3px;
 }
 
 .empty-text {
   text-align: center;
-  color: #999999;
-  padding: 48px;
+  color: #8898A8;
+  padding: 56px;
+  font-size: 14px;
 }
 
 .history-table {
@@ -304,21 +472,38 @@
 }
 
 .history-table th {
-  background-color: #F5F5F5;
-  padding: 12px 8px;
+  background-color: #F5F7FA;
+  padding: 12px 10px;
   text-align: center;
   font-weight: 600;
-  color: #666666;
-  border-bottom: 2px solid #E0E0E0;
+  color: #6B7785;
+  border-bottom: 1px solid #E0EAF4;
+  font-size: 12px;
+  letter-spacing: -0.1px;
 }
 
 .history-table td {
-  padding: 12px 8px;
+  padding: 14px 10px;
   text-align: center;
-  border-bottom: 1px solid #F5F5F5;
-  color: #333333;
+  border-bottom: 1px solid #F0F4F8;
+  color: #1F2A3C;
 }
 
 .history-table tbody tr:hover {
-  background-color: #FAFAFA;
+  background-color: #FAFCFE;
+}
+
+.history-table .cell-secondary {
+  font-size: 12px;
+  color: #6B7785;
+  margin-top: 2px;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #FFFFFF;
 }

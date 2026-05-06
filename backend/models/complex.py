@@ -20,8 +20,12 @@ class Complex(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False, comment="단지명")
     address = Column(String(500), nullable=False, comment="주소")
-    region_code = Column(String(20), nullable=True, comment="지역코드")
-    
+    region_code = Column(String(20), nullable=True, index=True, comment="시군구코드 (5자리)")
+
+    # 법정동 (newtech_data 가 채움)
+    dong_code = Column(String(10), nullable=True, index=True, comment="법정동코드 (10자리)")
+    dong_name = Column(String(50), nullable=True, comment="법정동명")
+
     # KB 소스 식별자
     kb_complex_id = Column(String(50), unique=True, nullable=True, comment="KB 단지 ID")
     
@@ -30,10 +34,16 @@ class Complex(Base):
     is_active = Column(Boolean, default=True, comment="수집 활성화 여부")
     collect_listings = Column(Boolean, default=True, comment="매물 수집 여부")
 
-    # 단지 상세 정보 (크롤링으로 수집)
+    # 단지 상세 정보 (newtech_data 수집기 스키마와 일치)
     total_households = Column(Integer, nullable=True, comment="총 세대수")
-    corridor_type = Column(String(50), nullable=True, comment="복도타입(계단식/복도식/혼합식)")
-    build_year = Column(Integer, nullable=True, comment="준공연도")
+    hallway_type = Column(String(50), nullable=True, comment="복도타입(계단식/복도식/혼합식)")
+    built_year = Column(String(10), nullable=True, comment="준공연도 (e.g., '1979')")
+    road_address = Column(String(500), nullable=True, comment="도로명 주소")
+    total_buildings = Column(Integer, nullable=True, comment="총 동 수")
+    max_floor = Column(Integer, nullable=True, comment="최고층")
+    total_parking = Column(Integer, nullable=True, comment="주차 대수")
+    heating_type = Column(String(50), nullable=True, comment="난방 방식")
+    builder = Column(String(200), nullable=True, comment="시공사")
 
     # 메타데이터
     created_at = Column(DateTime, default=datetime.utcnow)

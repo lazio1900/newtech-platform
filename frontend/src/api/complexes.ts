@@ -1,8 +1,15 @@
 import apiClient from "./client"
-import type { Complex, ComplexCreate, ComplexLastRunMap, PaginatedComplexes, RegionCounts } from "@/types/complex"
+import type { Area, Complex, ComplexCreate, ComplexLastRunMap, PaginatedComplexes, RegionCounts } from "@/types/complex"
 
 export const complexesApi = {
-  list: (params?: { skip?: number; limit?: number; is_active?: boolean; search?: string; region_code?: string }) =>
+  list: (params?: {
+    skip?: number;
+    limit?: number;
+    is_active?: boolean;
+    search?: string;
+    region_code?: string;
+    dong_code?: string;
+  }) =>
     apiClient.get<PaginatedComplexes>("/api/complexes", { params }).then((r) => r.data),
 
   regionCounts: () =>
@@ -10,6 +17,9 @@ export const complexesApi = {
 
   get: (id: number) =>
     apiClient.get<Complex>(`/api/complexes/${id}`).then((r) => r.data),
+
+  listAreas: (id: number) =>
+    apiClient.get<Area[]>(`/api/complexes/${id}/areas`).then((r) => r.data),
 
   create: (data: ComplexCreate) =>
     apiClient.post<Complex>("/api/complexes", data).then((r) => r.data),

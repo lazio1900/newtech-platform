@@ -419,13 +419,7 @@ export default function MonitoringTab() {
       )}
 
       {showRegistryModal && detailData && (
-        <RegistryModal
-          data={{
-            ...detailData.property_rights_info,
-            address: detailData.property_basic_info.address
-          }}
-          onClose={() => setShowRegistryModal(false)}
-        />
+        <RegistryModal onClose={() => setShowRegistryModal(false)} />
       )}
     </div>
   );

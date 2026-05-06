@@ -91,37 +91,64 @@ def generate_guarantor_info() -> GuarantorInfo:
     )
 
 
-def generate_property_basic_info(address: str) -> PropertyBasicInfo:
-    """담보 물건 기초 정보 생성"""
-    area = parse_area_from_address(address)
+def generate_property_basic_info(
+    address: str,
+    complex_name: str | None = None,
+    pyeong: int | None = None,
+) -> PropertyBasicInfo:
+    """매칭 실패 시 폴백.
 
-    # 지역에 따라 세대수와 입지점수 조정
+    크롤링 가능한 항목(세대수/복도타입/연식)은 임의 생성하지 않고 None(N/A).
+    평수는 신청자가 입력한 값(pyeong)을 사용. 입지점수만 지역 기반 추정값.
+    """
+    area = parse_area_from_address(address)
     if area in ["강남", "서초", "송파"]:
-        units = random.randint(500, 1500)
         location_score = random.randint(85, 98)
+    elif area == "기타":
+        location_score = random.randint(60, 80)
     else:
-        units = random.randint(300, 1000)
         location_score = random.randint(70, 90)
 
     return PropertyBasicInfo(
-        units=units,
-        corridor_type=random.choice(["계단식", "복도식", "혼합식"]),
-        age=random.randint(5, 40),
-        area=random.choice([24, 29, 34, 39, 42, 51, 59]),
-        location_score=location_score,
-        address=address
+        complex_name=complex_name,
+        units=None,           # 크롤링 영역 → 데이터 없으면 N/A
+        corridor_type=None,   # 크롤링 영역
+        age=None,             # 크롤링 영역
+        area=pyeong,          # 신청자 입력값
+        location_score=location_score,  # 생성값 (지리 API 미연동)
+        address=address,
     )
 
 
 OWNER_NAMES = ["정미자", "김영수", "이정희", "박성호", "최은주", "한상민", "윤서연", "장현우"]
 
-def generate_property_rights_info() -> PropertyRightsInfo:
-    """담보 물건 권리 정보 생성 (등기부등본 주요 등기사항 요약 기반)"""
+def generate_property_rights_info(address: str | None = None) -> PropertyRightsInfo:
+    """담보 물건 권리 정보 생성 (등기부등본 주요 등기사항 요약 기반).
+
+    address가 주어지면 소유자 주소를 동일 지역으로 생성 (지역 일관성 유지).
+    """
     banks = ["KB국민은행", "신한은행", "우리은행", "하나은행", "NH농협은행"]
     lenders = ["주식회사유캐피탈대부", "주식회사에이원대부", "주식회사파란캐피탈대부"]
 
     owner_name = random.choice(OWNER_NAMES)
     reg_prefix = f"{random.randint(500, 900):03d}{random.randint(1, 12):02d}"
+
+    # 소유자 주소: 입력된 담보주소를 기준으로 같은 지역 내 임의 주소 생성
+    if address:
+        district = parse_area_from_address(address)
+        dong_list = DONG_NAMES.get(district, ["역삼동"])
+        owner_dong = random.choice(dong_list)
+        owner_addr = (
+            f"서울 {district}구 {owner_dong} "
+            f"{random.randint(50, 600)}-{random.randint(1, 30)} "
+            f"{random.choice(COMPLEX_NAMES)} "
+            f"{random.randint(101, 130)}-{random.randint(101, 2000)}"
+        )
+    else:
+        owner_addr = (
+            f"서울 강남구 역삼동 {random.randint(100, 800)}-{random.randint(1, 30)} "
+            f"{random.choice(COMPLEX_NAMES)} {random.randint(101, 130)}-{random.randint(101, 2000)}"
+        )
 
     # 1. 소유지분현황 (갑구)
     ownership_entries = [
@@ -129,7 +156,7 @@ def generate_property_rights_info() -> PropertyRightsInfo:
             name=f"{owner_name} (소유자)",
             reg_number=f"{reg_prefix}-*******",
             share="단독소유",
-            address=f"서울 영등포구 문래동3가 55-4 문래동메가트리움 103-{random.randint(100,2000)}",
+            address=owner_addr,
             rank_number=1
         )
     ]

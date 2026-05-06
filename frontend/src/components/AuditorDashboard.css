@@ -280,43 +280,162 @@
   background-color: #005A9E;
 }
 
-/* 신청건 상세 */
+/* ---------- 신청건 상세 ---------- */
 .app-detail-header {
   background-color: #FFFFFF;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  padding: 20px 24px;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(5, 28, 72, 0.06);
+  padding: 0;
   margin-bottom: 24px;
+  overflow: hidden;
+}
+
+/* 상단 바: 뒤로가기 + 신청번호 + 상태 */
+.app-detail-topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 24px;
+  background: linear-gradient(135deg, #051C48 0%, #082458 100%);
 }
 
 .back-to-list-btn {
-  padding: 8px 16px;
-  background-color: #FFFFFF;
-  color: #006FBD;
-  border: 1px solid #006FBD;
-  border-radius: 4px;
+  padding: 6px 14px;
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   font-family: 'Noto Sans KR', sans-serif;
-  margin-bottom: 16px;
+  transition: background-color 0.15s;
 }
 
 .back-to-list-btn:hover {
-  background-color: #E8F6FA;
+  background-color: rgba(255, 255, 255, 0.22);
 }
 
-.app-detail-info {
+.app-detail-id {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+  letter-spacing: 0.3px;
+}
+
+.app-detail-id strong {
+  color: #FFFFFF;
+  margin-left: 4px;
+  font-weight: 600;
+}
+
+.app-detail-status.status-badge {
+  margin-left: auto;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+/* 담보 물건: 단지명/평형/동·호 강조 + 주소 */
+.app-detail-property {
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid #EEF2F7;
+}
+
+.property-primary {
   display: flex;
+  align-items: baseline;
   flex-wrap: wrap;
-  gap: 16px;
-  align-items: center;
-  margin-bottom: 16px;
-  font-size: 14px;
-  color: #666666;
+  gap: 14px;
 }
 
-.app-detail-info strong {
-  color: #333333;
+.property-complex {
+  font-size: 22px;
+  font-weight: 700;
+  color: #051C48;
+  letter-spacing: -0.4px;
+}
+
+.property-meta {
+  font-size: 14px;
+  font-weight: 500;
+  color: #344458;
+  padding: 4px 12px;
+  background-color: #EEF4FB;
+  border-radius: 6px;
+}
+
+.property-address {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #6B7785;
+}
+
+/* 신청 조건: 5칸 grid */
+.app-detail-loan {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  padding: 16px 24px 18px;
+}
+
+.loan-info-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 14px;
+  border-left: 1px solid #EEF2F7;
+}
+
+.loan-info-cell:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+
+.loan-info-label {
+  font-size: 11px;
+  color: #8898A8;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.loan-info-value {
+  font-size: 14px;
+  color: #1F2A3C;
+  font-weight: 500;
+}
+
+.loan-info-value.strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: #006FBD;
+}
+
+.loan-info-sub {
+  color: #6B7785;
+  font-weight: 400;
+  font-size: 13px;
+}
+
+/* 공통 상태 배지 */
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+@media (max-width: 1100px) {
+  .app-detail-loan {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px 0;
+  }
+  .loan-info-cell:nth-child(3n+1) {
+    padding-left: 0;
+    border-left: none;
+  }
 }
 
 .app-status-actions {
