@@ -35,12 +35,15 @@ def _build_real_property_basic_info(
     complex_obj,
     area_obj,
     property_address: str,
+    location_scores=None,
 ) -> PropertyBasicInfo:
-    """DB의 Complex/Area 데이터로 담보 물건 기초 정보를 구성한다."""
-    units = complex_obj.total_households  # None이면 N/A
-    corridor_type = complex_obj.hallway_type  # newtech_data 컬럼명: hallway_type
+    """DB의 Complex/Area 데이터로 담보 물건 기초 정보를 구성한다.
 
-    # built_year 는 VARCHAR — "1999", "1999.11" 등 → 앞 4자리만 추출
+    location_scores 가 주어지면 6개 카테고리 평균을 location_score 에 채운다.
+    """
+    units = complex_obj.total_households
+    corridor_type = complex_obj.hallway_type
+
     age = None
     if complex_obj.built_year:
         try:
@@ -55,7 +58,15 @@ def _build_real_property_basic_info(
         elif area_obj.exclusive_m2:
             area_pyeong = int(area_obj.exclusive_m2 / 3.305785)
 
-    # location_score는 DB에 없음 (지리 API 필요) → None (N/A)
+    # 단일 location_score = LocationScores 6개 카테고리 평균 (없으면 N/A)
+    location_score = None
+    if location_scores is not None:
+        location_score = round(
+            (location_scores.station_walk + location_scores.commute_time
+             + location_scores.school_walk + location_scores.units_score
+             + location_scores.living_env + location_scores.nature_env) / 6
+        )
+
     return PropertyBasicInfo(
         complex_name=complex_obj.name,
         address=property_address or complex_obj.address,
@@ -63,7 +74,9 @@ def _build_real_property_basic_info(
         corridor_type=corridor_type,
         age=age,
         area=area_pyeong,
-        location_score=None,
+        exclusive_m2=area_obj.exclusive_m2 if area_obj else None,
+        supply_m2=area_obj.supply_m2 if area_obj else None,
+        location_score=location_score,
     )
 
 
@@ -76,6 +89,7 @@ def perform_full_analysis(
     complex_id: Optional[int] = None,
     area_id: Optional[int] = None,
     complex_name: Optional[str] = None,
+    application_id: Optional[str] = None,
 ) -> AnalysisResponse:
     """전체 분석 수행 - 실 수집 데이터 우선, 없으면 더미 폴백.
 
@@ -108,28 +122,33 @@ def perform_full_analysis(
         except Exception as e:
             logger.warning(f"실 데이터 조회 실패, 더미 폴백: {e}")
             real_data = None
-        finally:
-            if should_close_db:
-                db.close()
-
-    # 담보 물건 기초 정보: 실 DB 우선, 없으면 더미 (입력값만 채우고 나머지 N/A)
-    if real_data and real_data.get("complex"):
-        property_basic_info = _build_real_property_basic_info(
-            real_data["complex"],
-            real_data.get("area"),
-            property_address,
-        )
-    else:
-        property_basic_info = generate_property_basic_info(
-            property_address,
-            complex_name=complex_name,
-            pyeong=target_pyeong,
-        )
 
     # 1. 더미 데이터 생성 (실 데이터 없는 항목만)
     borrower_info = generate_borrower_info(company_name)
     guarantor_info = generate_guarantor_info()
     property_rights_info = generate_property_rights_info(property_address)
+
+    # 1-0. 등기부등본 LLM 권리 분석 — 신청건에 registry_ic_id 가 있으면 PDF 추출 + LLM
+    rights_llm: dict = {}
+    registry_ic_id_for_app = None
+    if application_id and db is not None:
+        try:
+            from models.loan import LoanApplication
+            la = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
+            if la and la.registry_ic_id:
+                registry_ic_id_for_app = la.registry_ic_id
+                from services.ai_rights_analysis_service import generate_or_get_cached as gen_rights
+                rights_llm = gen_rights(db, application_id, la.registry_ic_id)
+        except Exception as e:
+            logger.warning(f"AI 권리 분석 실패: {e}")
+    # rights_llm 결과로 property_rights_info 의 표 4종 + 합계 채움 (있으면)
+    # 등기부 추출이 한 건이라도 성공하면 합계도 항상 덮어쓰기 (0 도 의미있는 실값)
+    if rights_llm.get("ownership_entries") or rights_llm.get("mortgage_entries"):
+        property_rights_info.ownership_entries = rights_llm.get("ownership_entries") or []
+        property_rights_info.ownership_other_entries = rights_llm.get("ownership_other_entries") or []
+        property_rights_info.mortgage_entries = rights_llm.get("mortgage_entries") or []
+        property_rights_info.max_bond_amount = int(rights_llm.get("max_bond_amount") or 0)
+        property_rights_info.tenant_deposit = int(rights_llm.get("tenant_deposit") or 0)
 
     # 시세 데이터: 실 데이터 우선, 없으면 더미
     credit_data = (
@@ -138,8 +157,32 @@ def perform_full_analysis(
         else generate_credit_data(property_address)
     )
 
-    # 1-1. 입지 점수 생성 (항상 더미 - 지리 API 필요)
-    location_scores = generate_location_scores(property_address)
+    # 1-1. 입지 점수: 실 facility 데이터(학군/지하철/병원/공원) 우선, 없으면 더미
+    location_scores = None
+    if real_data and real_data.get("complex") and db is not None:
+        try:
+            from services.location_score_service import compute_location_scores
+            location_scores = compute_location_scores(db, real_data["complex"])
+        except Exception as e:
+            logger.warning(f"입지점수 산출 실패, 더미 폴백: {e}")
+    if location_scores is None:
+        location_scores = generate_location_scores(property_address)
+
+    # 담보 물건 기초 정보: 실 DB 우선, 없으면 더미.
+    # location_scores 평균을 단일 location_score 에 주입 (N/A 방지).
+    if real_data and real_data.get("complex"):
+        property_basic_info = _build_real_property_basic_info(
+            real_data["complex"],
+            real_data.get("area"),
+            property_address,
+            location_scores=location_scores,
+        )
+    else:
+        property_basic_info = generate_property_basic_info(
+            property_address,
+            complex_name=complex_name,
+            pyeong=target_pyeong,
+        )
 
     # 1-2. 인근 유사 물건지 동향: 실 데이터 우선
     nearby_trends = (
@@ -163,7 +206,9 @@ def perform_full_analysis(
     # LTV 산출에 필요한 값
     total_prior = property_rights_info.max_bond_amount + property_rights_info.tenant_deposit + loan_amount
     ltv_current = round(total_prior / credit_data.kb_price.estimated * 100, 1) if credit_data.kb_price.estimated > 0 else 0
-    ltv_jb = round(total_prior / credit_data.kb_price.low * 100, 1) if credit_data.kb_price.low > 0 else 0
+    # JB 적정시세 기준 LTV (KB×0.3 + 실거래×0.6 + 호가×0.1)
+    jb_basis = credit_data.jb_fair_price or credit_data.kb_price.low or credit_data.kb_price.estimated
+    ltv_jb = round(total_prior / jb_basis * 100, 1) if jb_basis > 0 else 0
 
     # 유사물건 평균 변동률
     avg_change = 0
@@ -198,82 +243,110 @@ def perform_full_analysis(
     )
     seizure_text = '가압류 1건 존재하여 해소 조건 부과 필요.' if has_seizure else '가압류 등 특이사항 없음.'
 
-    comprehensive_opinion = f"""[입지] {property_address} 소재 물건은 역세권·학군·대단지 요건을 갖추고 있으며, 입지 종합 등급 A로 담보 적격성이 양호합니다.
-[권리] 갑구 소유권 이전 이력 정상이며, 을구 선순위 근저당 {property_rights_info.max_bond_amount // 100000000}억원 설정 확인. {seizure_text}
-[시세] KB 추정가 기준 최근 3개월 시세 흐름이 안정적이며, 국토부 실거래가·네이버 호가 모두 유사 수준으로 시세 신뢰도가 높습니다.
-[유사물건] 반경 500m 내 유사 {len(nearby_trends.similar_properties)}개 단지의 최근 3개월 평균 변동률은 {avg_change:+.1f}%로, 인근 시세가 {'상승' if avg_change > 0 else '하락' if avg_change < 0 else '보합'} 추세입니다.
-[평단가] 단지 평단가는 최근 3개월간 {pyeong_direction} 흐름이며, 읍면동·시군구 평균 대비 {'상회' if pyeong_data and pyeong_data[-1].complex > pyeong_data[-1].dong else '유사한 수준'}하고 있습니다.
-[LTV] 선순위 채권 + 대출신청금액 합산 기준 현재 시세 LTV {ltv_current}%, JB 적정시세 LTV {ltv_jb}%로 {'사내 기준 이내로 대출 실행 가능합니다.' if ltv_jb <= 85 else '사내 기준 초과 가능성이 있어 한도 조정 검토가 필요합니다.'}"""
+    comprehensive_opinion_fallback = (
+        f"[입지] 입지 데이터 분석 진행 중입니다.\n"
+        f"[권리] 갑구·을구 확인 결과 선순위 근저당 {property_rights_info.max_bond_amount // 100000000}억원 설정. {seizure_text}\n"
+        f"[시세] 최근 시세 흐름 분석 중입니다.\n"
+        f"[유사물건] 인근 평균 변동률 {avg_change:+.1f}%.\n"
+        f"[평단가] 단지 평단가 {pyeong_direction} 흐름.\n"
+        f"[LTV] 현재 LTV {ltv_current}%, JB LTV {ltv_jb}%."
+    )
 
-    # 3. AI 분석 (하드코딩)
-    # TODO: LLM API 연동 시 아래 하드코딩 블록을 삭제하고 API 호출 블록으로 교체
+    # 3. AI 입지 분석 — 실 facility 데이터 있으면 LLM, 없으면 더미
+    property_analysis_text = None
+    if real_data and real_data.get("complex") and db is not None:
+        try:
+            from services.ai_property_analysis_service import generate_or_get_cached
+            property_analysis_text = generate_or_get_cached(
+                db=db,
+                application_id=application_id,
+                complex_obj=real_data["complex"],
+                scores=location_scores,
+                pyeong=target_pyeong,
+            )
+        except Exception as e:
+            logger.warning(f"AI 입지 분석 호출 실패, 더미 폴백: {e}")
+    if not property_analysis_text:
+        property_analysis_text = (
+            f"[입지 분석] {property_address} 단지에 대해 현재 자동 분석 결과를 생성할 수 없습니다. "
+            "단지 좌표와 주변 시설 데이터(학군/지하철/병원/공원)가 수집된 후 다시 시도해주세요."
+        )
+
+    # 3-2. AI 시세 분석 — 실 시세 데이터 있으면 LLM, 없으면 더미
+    market_analysis_text = None
+    if real_data and real_data.get("credit_data") and db is not None:
+        try:
+            from services.ai_market_analysis_service import generate_or_get_cached as gen_market
+            market_analysis_text = gen_market(
+                db=db,
+                application_id=application_id,
+                credit=credit_data,
+                nearby=nearby_trends,
+                loan_amount=loan_amount,
+                total_prior=total_prior,
+                pyeong=target_pyeong,
+            )
+        except Exception as e:
+            logger.warning(f"AI 시세 분석 호출 실패, 더미 폴백: {e}")
+
+    # 3-3. AI 유사물건 종합 코멘트 — 인근 + 평단가 통합
+    nearby_analysis_text = None
+    if real_data and nearby_trends and nearby_trends.similar_properties and db is not None:
+        try:
+            from services.ai_nearby_analysis_service import generate_or_get_cached as gen_nearby
+            target_recent_price = nearby_trends.target_recent_price
+            target_name = real_data["complex"].name if real_data.get("complex") else (complex_name or "")
+            nearby_analysis_text = gen_nearby(
+                db=db,
+                application_id=application_id,
+                target_complex_name=target_name,
+                target_recent_price=target_recent_price,
+                nearby=nearby_trends,
+                ppp=price_per_pyeong,
+            )
+        except Exception as e:
+            logger.warning(f"AI 유사물건 분석 호출 실패: {e}")
+
+    # 3-4. AI 종합 의견 + 심사역 권고 — 모든 분석 사실 종합 LLM
+    overall_opinion = comprehensive_opinion_fallback
+    auditor_recommendation = ""
+    if real_data and db is not None:
+        try:
+            from services.ai_overall_analysis_service import generate_or_get_cached as gen_overall
+            ov = gen_overall(
+                db=db, application_id=application_id,
+                pbi=property_basic_info, scores=location_scores,
+                credit=credit_data, nearby=nearby_trends, ppp=price_per_pyeong,
+                rights=property_rights_info,
+                loan_amount=loan_amount,
+                ltv_current=ltv_current, ltv_jb=ltv_jb,
+            )
+            if ov.get("comprehensive_opinion"):
+                overall_opinion = ov["comprehensive_opinion"]
+            auditor_recommendation = ov.get("auditor_recommendation", "")
+        except Exception as e:
+            logger.warning(f"AI 종합 의견 호출 실패: {e}")
+
     ai_analysis = AIAnalysis(
-        comprehensive_opinion=comprehensive_opinion,
+        comprehensive_opinion=overall_opinion,
+        auditor_recommendation=auditor_recommendation,
 
-        property_analysis=f"""[AI 입지 분석 결과]
-
-1. 교통 접근성 (역세권 / 업무지구)
-  - 대상 물건: {property_address}
-  - 역세권: 인근 지하철역 도보 7분 이내, 더블 역세권에 해당하여 대중교통 접근성 '우수'
-  - GBD(강남권): 강남 업무지구까지 대중교통 약 20분 소요, 접근성 '양호'
-  - CBD(도심권): 종로/광화문 도심 업무지구까지 약 35분 소요, 접근성 '보통'
-  - YBD(여의도권): 여의도 업무지구까지 약 30분 소요, 접근성 '보통'
-
-2. 학군 / 교육환경
-  - 초품아: 단지 내 초등학교 배정 가능, 통학 도보 5분 이내
-  - 학권가: 해당 지역은 학원가 밀집 지역으로 교육 수요 '매우 높음'
-  - 중·고교 학군 선호도가 높아 실거주 수요가 견고한 지역
-
-3. 단지 특성 (세대수 / 연식 / 브랜드)
-  - 세대수: 약 4,400세대 대규모 단지로 커뮤니티 인프라 및 관리 여건 '우수'
-  - 연식: 준공 후 약 15년 경과, 잔존 내용연수 충분 (리모델링 대상 가능)
-  - 브랜드: 1군 건설사 시공 브랜드 아파트로 시장 선호도 '높음'
-  - 커뮤니티시설: 피트니스, 독서실, 키즈카페, 게스트하우스 등 완비
-
-4. 생활환경 / 자연환경
-  - 마트: 대형마트(이마트/코스트코) 차량 5분 이내 접근 가능
-  - 숲세권: 인근 근린공원 도보 10분 이내, 산책로 접근성 '양호'
-  - 물세뷰: 한강 조망 가능 세대 존재, 리버뷰 프리미엄 형성 가능성 있음
-  - 문화시설: 도서관, 복합문화센터, 영화관 등 도보/차량 10분 이내
-
-5. 전세가율 분석
-  - 현재 전세가율 약 62% 수준으로 실수요 기반의 안정적 시장 구조
-  - 전세가율이 60% 이상으로 갭투자 수요보다 실거주 비중이 높은 것으로 판단
-
-6. 종합 의견
-  - 입지 종합 등급: '우수' (A등급)
-  - 역세권 + 학군 + 대단지 + 브랜드의 복합 입지 프리미엄이 확인됩니다.
-  - 담보물건으로서의 입지 적격성은 충분하며, 중장기 가치 유지 가능성이 높습니다.""",
+        property_analysis=property_analysis_text,
+        nearby_analysis=nearby_analysis_text,
 
         location_scores=location_scores,
 
         rights_analysis=RightsAnalysisDetail(
-            gap_summary="등기부 갑구 확인 결과 현 소유자의 단독소유로 확인되며, 소유권 이전 이력은 정상적입니다. 가압류, 가처분 등 소유권 제한 사항은 존재하지 않습니다.",
-            eul_summary="을구 확인 결과 근저당권 1건이 설정되어 있으며, 근질권(채권자: 제이비우리캐피탈)이 함께 설정되어 있습니다. 채권최고액 기준 선순위 부담을 고려한 담보 여력 산정이 필요합니다.",
-            seizure_summary="갑구 및 을구에서 가압류, 가처분 등 권리 침해 사항은 확인되지 않습니다. 공적 제한 없이 담보 취득이 가능한 상태입니다.",
-            priority_summary="현재 설정된 근저당권 기준 선순위 채권최고액을 고려하여 후순위 담보 취득 시 LTV 산정이 필요하며, 임차인 현황 확인을 통해 대항력 있는 임차권 존부를 추가 확인할 필요가 있습니다."
+            gap_summary=rights_llm.get("gap_summary") or "등기부 갑구 확인 결과 현 소유자의 단독소유로 확인되며, 소유권 이전 이력은 정상적입니다. 가압류, 가처분 등 소유권 제한 사항은 존재하지 않습니다.",
+            eul_summary=rights_llm.get("eul_summary") or "을구 확인 결과 근저당권 1건이 설정되어 있으며, 근질권(채권자: 제이비우리캐피탈)이 함께 설정되어 있습니다. 채권최고액 기준 선순위 부담을 고려한 담보 여력 산정이 필요합니다.",
+            seizure_summary=rights_llm.get("seizure_summary") or "갑구 및 을구에서 가압류, 가처분 등 권리 침해 사항은 확인되지 않습니다. 공적 제한 없이 담보 취득이 가능한 상태입니다.",
+            priority_summary=rights_llm.get("priority_summary") or "현재 설정된 근저당권 기준 선순위 채권최고액을 고려하여 후순위 담보 취득 시 LTV 산정이 필요하며, 임차인 현황 확인을 통해 대항력 있는 임차권 존부를 추가 확인할 필요가 있습니다."
         ),
 
-        market_analysis=f"""[AI 시세 분석 결과]
-
-1. KB 시세 분석
-  - KB 부동산 추정가 기준 해당 물건의 시세는 안정적인 흐름을 보이고 있습니다.
-  - 최근 3개월간 소폭 상승 추세이며, 급격한 변동은 관찰되지 않습니다.
-
-2. 실거래가 분석
-  - 국토교통부 실거래가 데이터 기준 최근 거래는 KB 추정가 대비 유사한 수준에서 체결되었습니다.
-  - 동일 단지 내 거래 빈도가 적정 수준으로, 유동성 리스크는 낮은 것으로 판단됩니다.
-
-3. 매매호가 분석
-  - 네이버 부동산 매매호가 기준 현재 호가는 KB 시세 대비 소폭 상회하고 있습니다.
-  - 매물 수가 적정 범위로, 급매물 출현에 따른 가격 하락 리스크는 제한적입니다.
-
-4. LTV 검토
-  - 신청 금액 {loan_amount:,}원 기준 KB 추정가 대비 LTV 비율 산정이 필요합니다.
-  - 사내 LTV 기준 충족 여부를 최종 확인한 후 대출 한도를 산정해야 합니다.
-
-5. 종합 의견
-  - 시세 안정성은 '양호'하며, 담보가치 대비 적정 대출 비율 내에서 대출 실행이 가능할 것으로 판단됩니다."""
+        market_analysis=market_analysis_text or (
+            f"[종합 의견] AI 시세 분석 일시 사용 불가. KB 추정가 {credit_data.kb_price.estimated:,}원, "
+            f"신청금액 {loan_amount:,}원 기준 LTV 산정이 필요합니다."
+        ),
     )
 
     # TODO: LLM API 연동 시 아래 블록 주석 해제
@@ -308,6 +381,9 @@ def perform_full_analysis(
         nearby_property_trends=nearby_trends,
         price_per_pyeong_trend=price_per_pyeong
     )
+
+    if should_close_db and db is not None:
+        db.close()
 
     return AnalysisResponse(
         status="success",

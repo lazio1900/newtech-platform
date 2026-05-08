@@ -216,16 +216,36 @@ body {
 
 .market-right {
   display: flex;
+  min-height: 0;        /* grid stretch + flex 내부 스크롤 핵심 */
 }
 
 .market-right .ai-card {
   flex: 1;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.market-right .ai-card h3 {
+  flex-shrink: 0;       /* 헤더는 고정 높이 */
+}
+
+.market-right .ai-card .ai-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;     /* 본문만 스크롤 */
+  padding-right: 4px;   /* 스크롤바 여백 */
 }
 
 .market-right .ai-card .ai-content pre {
   font-size: 13px;
   line-height: 1.5;
+}
+
+.market-right .ai-card button {
+  flex-shrink: 0;       /* 상세보기 버튼 고정 */
+  margin-top: 12px;
 }
 
 /* 심사역 종합 의견 */

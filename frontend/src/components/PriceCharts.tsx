@@ -1,7 +1,10 @@
+import React from 'react';
 import {
   ResponsiveContainer,
   LineChart,
   Line,
+  Area,
+  ComposedChart,
   ScatterChart,
   Scatter,
   XAxis,
@@ -9,6 +12,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ReferenceLine,
 } from 'recharts';
 import type { CreditDataWithHistory } from '@/types/loan';
 
@@ -20,6 +24,7 @@ interface PriceChartsProps {
 interface ChartDataPoint {
   date: string;
   dateLabel: string;
+  ts: number;
   price: number;
 }
 
@@ -48,131 +53,121 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
     return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}`;
   };
 
-  const kbData: ChartDataPoint[] = data.kb_price.history.map(point => ({
-    date: point.date,
-    dateLabel: formatDate(point.date),
-    price: point.price
-  }));
-
-  const molitData: ChartDataPoint[] = data.molit_transactions.history.map(point => ({
-    date: point.date,
-    dateLabel: formatDate(point.date),
-    price: point.price
-  }));
-
-  const naverData: ChartDataPoint[] = data.naver_listings.history.map(point => ({
-    date: point.date,
-    dateLabel: formatDate(point.date),
-    price: point.price
-  }));
-
-  // JB 적정 시세 계산
-  const buildJbFairPriceData = () => {
-    const kbHistory = data.kb_price.history;
-    const molitHistory = data.molit_transactions.history;
-    const naverHistory = data.naver_listings.history;
-
-    // 각 소스의 평균 가격 계산
-    const kbAvg = kbHistory.reduce((sum, p) => sum + p.price, 0) / kbHistory.length;
-    const molitAvg = molitHistory.reduce((sum, p) => sum + p.price, 0) / molitHistory.length;
-    const naverAvg = naverHistory.reduce((sum, p) => sum + p.price, 0) / naverHistory.length;
-
-    // 월별로 JB 적정 시세 계산 (KB*0.3 + 실거래가*0.6 + 매매호가*0.1)
-    // KB는 월별 데이터가 있으므로 기준으로 사용
-    const historicalData: JbDataPoint[] = kbHistory.map((kbPoint, idx) => {
-      const kbPrice = kbPoint.price;
-      // 같은 시기의 실거래가/호가가 없으면 평균 사용
-      const molitPrice = molitHistory[idx]?.price || molitAvg;
-      const naverPrice = naverHistory[idx]?.price || naverAvg;
-      const jbPrice = Math.round(kbPrice * 0.3 + molitPrice * 0.6 + naverPrice * 0.1);
-
-      return {
-        date: kbPoint.date,
-        dateLabel: formatYearMonth(kbPoint.date),
-        jbPrice,
-        type: 'actual'
-      };
-    });
-
-    // 최신 JB 적정 시세
-    const latestJbPrice = historicalData[historicalData.length - 1]?.jbPrice || 0;
-
-    // 최근 매매호가 vs 실거래가 비교 -> 추세 결정
-    const latestNaverPrice = naverHistory[naverHistory.length - 1]?.price || naverAvg;
-    const latestMolitPrice = molitHistory[molitHistory.length - 1]?.price || molitAvg;
-    const isUptrend = latestNaverPrice > latestMolitPrice;
-    const annualRate = isUptrend ? 0.05 : -0.05;
-    const monthlyRate = annualRate / 12;
-
-    // 예측 데이터 생성 (대출기간만큼)
-    const lastDate = new Date(kbHistory[kbHistory.length - 1].date);
-    const predictionData: JbDataPoint[] = [];
-
-    // 실측 마지막 포인트를 예측 시작점에도 추가 (연결을 위해)
-    for (let m = 1; m <= loanDuration; m++) {
-      const futureDate = new Date(lastDate);
-      futureDate.setMonth(futureDate.getMonth() + m);
-      const predictedPrice = Math.round(latestJbPrice * Math.pow(1 + monthlyRate, m));
-
-      predictionData.push({
-        date: futureDate.toISOString().split('T')[0],
-        dateLabel: formatYearMonth(futureDate.toISOString().split('T')[0]),
-        predictedPrice: predictedPrice,
-        type: 'predicted'
-      });
+  // 3개월 윈도우 (오늘 기준) — X축 도메인은 데이터 유무와 무관하게 항상 [start, today]
+  const _today = new Date();
+  _today.setHours(23, 59, 59, 0);
+  const _threeMonthsAgo = new Date(_today);
+  _threeMonthsAgo.setMonth(_threeMonthsAgo.getMonth() - 3);
+  _threeMonthsAgo.setHours(0, 0, 0, 0);
+  const startTs = _threeMonthsAgo.getTime();
+  const endTs = _today.getTime();
+  const _inWindow = (d: string) => {
+    const t = new Date(d).getTime();
+    return t >= startTs && t <= endTs;
+  };
+  const _toPoint = (p: { date: string; price: number }) => ({
+    date: p.date,
+    dateLabel: formatDate(p.date),
+    ts: new Date(p.date).getTime(),
+    price: p.price,
+  });
+  // X축 tick: 매월 1일
+  const monthlyTicks: number[] = [];
+  {
+    const t = new Date(_threeMonthsAgo);
+    t.setDate(1);
+    while (t.getTime() <= endTs) {
+      if (t.getTime() >= startTs) monthlyTicks.push(t.getTime());
+      t.setMonth(t.getMonth() + 1);
     }
-
-    // 실측 마지막 점에 predictedPrice도 넣어 이음새 연결
-    const lastHistorical = { ...historicalData[historicalData.length - 1], predictedPrice: latestJbPrice };
-    historicalData[historicalData.length - 1] = lastHistorical;
-
-    // 3개월 간격으로 샘플링 (너무 촘촘하지 않게)
-    const sampledPrediction = predictionData.filter((_, idx) => idx % 3 === 0 || idx === predictionData.length - 1);
-
-    const combined = [...historicalData, ...sampledPrediction];
-
-    return { combined, isUptrend, latestJbPrice, annualRate };
+    if (!monthlyTicks.includes(endTs)) monthlyTicks.push(endTs);
+  }
+  const xTickFormatter = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
   };
 
-  const { combined: jbData, isUptrend, latestJbPrice } = buildJbFairPriceData();
+  const kbData: ChartDataPoint[] = data.kb_price.history.filter(p => _inWindow(p.date)).map(_toPoint);
+  const molitData: ChartDataPoint[] = data.molit_transactions.history.filter(p => _inWindow(p.date)).map(_toPoint);
+  const naverData: ChartDataPoint[] = data.naver_listings.history.filter(p => _inWindow(p.date)).map(_toPoint);
 
-  // 3개 차트 공통 Y축 범위 (KB, 실거래가, 매매호가)
+  // JB 적정시세 추이 — backend 산출. 시점이 1개라도 표시.
+  const jbHistorySrc = data.jb_detail?.history || [];
+  const jbHistoryData = (
+    jbHistorySrc.length > 0
+      ? jbHistorySrc
+      : (data.jb_fair_price ? [{ date: new Date().toISOString().split('T')[0], price: data.jb_fair_price }] : [])
+  ).filter(p => _inWindow(p.date)).map(_toPoint);
+  const latestJbPrice = data.jb_fair_price || jbHistoryData[jbHistoryData.length - 1]?.price || 0;
+  const jbWeights = data.jb_detail?.weights || { kb: 0.3, molit: 0.6, naver: 0.1 };
+
+  // JB 차트 데이터 — 실측(history) + 예측(forecast 향후 3개월만). 6개월 윈도우.
+  const forecastSrc = (data.jb_detail?.forecast || []).slice(0, 4);  // m=0..3
+  const jbCombined: Array<{
+    ts: number;
+    date: string;
+    history?: number;
+    predicted?: number;
+    lower?: number;
+    upper?: number;
+    range?: [number, number];
+  }> = [];
+  for (const h of jbHistoryData) {
+    jbCombined.push({ ts: h.ts, date: h.date, history: h.price });
+  }
+  for (const f of forecastSrc) {
+    const ts = new Date(f.date).getTime();
+    jbCombined.push({
+      ts,
+      date: f.date,
+      predicted: f.predicted,
+      lower: f.lower,
+      upper: f.upper,
+      range: [f.lower, f.upper],
+    });
+  }
+  jbCombined.sort((a, b) => a.ts - b.ts);
+
+  // JB 차트 X축 — 과거 3개월 ~ 미래 3개월 (총 6개월)
+  const jbEndDate = new Date(_today);
+  jbEndDate.setMonth(jbEndDate.getMonth() + 3);
+  const jbEndTs = jbEndDate.getTime();
+  const jbXTicks: number[] = [];
+  {
+    const t = new Date(_threeMonthsAgo);
+    t.setDate(1);
+    while (t.getTime() <= jbEndTs) {
+      if (t.getTime() >= startTs) jbXTicks.push(t.getTime());
+      t.setMonth(t.getMonth() + 1);
+    }
+    if (!jbXTicks.includes(endTs)) jbXTicks.push(endTs);
+  }
+
+  // 3개 차트 공통 Y축 범위 (KB, 실거래가, 매매호가) — 데이터 없을 때 가드
   const allPrices = [
     ...kbData.map(d => d.price),
     ...molitData.map(d => d.price),
     ...naverData.map(d => d.price),
-  ];
-  const priceMin = Math.min(...allPrices);
-  const priceMax = Math.max(...allPrices);
+  ].filter(v => v > 0);
+  const priceMin = allPrices.length > 0 ? Math.min(...allPrices) : 0;
+  const priceMax = allPrices.length > 0 ? Math.max(...allPrices) : 100000000;
   const priceMargin = Math.max(Math.round((priceMax - priceMin) * 0.15), 50000000);
   const sharedYMin = Math.max(0, Math.floor((priceMin - priceMargin) / 100000000) * 100000000);
   const sharedYMax = Math.ceil((priceMax + priceMargin) / 100000000) * 100000000;
 
-  // JB 적정 시세 차트 Y축 오토스케일
-  const jbPrices = jbData.map(d => d.jbPrice ?? d.predictedPrice ?? 0).filter(v => v > 0);
-  const jbMin = Math.min(...jbPrices);
-  const jbMax = Math.max(...jbPrices);
-  const jbMargin = Math.max(Math.round((jbMax - jbMin) * 0.15), 50000000);
+  // JB 차트 Y축 — 실측 + 예측 신뢰구간 모두 포함
+  const jbAllValues: number[] = [];
+  for (const c of jbCombined) {
+    if (c.history) jbAllValues.push(c.history);
+    if (c.lower) jbAllValues.push(c.lower);
+    if (c.upper) jbAllValues.push(c.upper);
+  }
+  const jbMin = jbAllValues.length > 0 ? Math.min(...jbAllValues) : sharedYMin;
+  const jbMax = jbAllValues.length > 0 ? Math.max(...jbAllValues) : sharedYMax;
+  const jbMargin = Math.max(Math.round((jbMax - jbMin) * 0.10), 30000000);
   const jbYMin = Math.max(0, Math.floor((jbMin - jbMargin) / 100000000) * 100000000);
   const jbYMax = Math.ceil((jbMax + jbMargin) / 100000000) * 100000000;
 
-  const JbTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const d = payload[0].payload;
-      return (
-        <div className="chart-tooltip">
-          <p className="tooltip-label">{d.date}</p>
-          {d.jbPrice && <p className="tooltip-value" style={{ color: '#FF8C00' }}>JB 적정시세: {formatPrice(d.jbPrice)}</p>}
-          {d.predictedPrice && d.type === 'predicted' && (
-            <p className="tooltip-value" style={{ color: isUptrend ? '#E74C3C' : '#3498DB' }}>
-              예측: {formatPrice(d.predictedPrice)}
-            </p>
-          )}
-        </div>
-      );
-    }
-    return null;
-  };
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
@@ -191,14 +186,18 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
     <>
       <div className="price-charts-grid">
         <div className="chart-box">
-          <h4>KB 시세 (추정가)</h4>
+          <h4>KB 시세 추이</h4>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={kbData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
               <XAxis
-                dataKey="dateLabel"
+                dataKey="ts"
+                type="number"
+                domain={[startTs, endTs]}
+                ticks={monthlyTicks}
+                tickFormatter={xTickFormatter}
                 tick={{ fontSize: 10 }}
-                interval={Math.floor(kbData.length / 4)}
+                allowDataOverflow
               />
               <YAxis
                 domain={[sharedYMin, sharedYMax]}
@@ -212,7 +211,7 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
                 dataKey="price"
                 stroke="#006FBD"
                 strokeWidth={2}
-                dot={false}
+                dot={{ r: 3, fill: '#006FBD' }}
                 name="KB시세"
               />
             </LineChart>
@@ -220,14 +219,18 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
         </div>
 
         <div className="chart-box">
-          <h4>국토교통부 실거래가</h4>
+          <h4>실거래가 추이</h4>
           <ResponsiveContainer width="100%" height={200}>
             <ScatterChart>
               <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
               <XAxis
-                dataKey="dateLabel"
+                dataKey="ts"
+                type="number"
+                domain={[startTs, endTs]}
+                ticks={monthlyTicks}
+                tickFormatter={xTickFormatter}
                 tick={{ fontSize: 10 }}
-                domain={['dataMin', 'dataMax']}
+                allowDataOverflow
               />
               <YAxis
                 dataKey="price"
@@ -247,14 +250,18 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
         </div>
 
         <div className="chart-box">
-          <h4>네이버페이 부동산 매매호가</h4>
+          <h4>부동산 매매호가 추이</h4>
           <ResponsiveContainer width="100%" height={200}>
             <ScatterChart>
               <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
               <XAxis
-                dataKey="dateLabel"
+                dataKey="ts"
+                type="number"
+                domain={[startTs, endTs]}
+                ticks={monthlyTicks}
+                tickFormatter={xTickFormatter}
                 tick={{ fontSize: 10 }}
-                domain={['dataMin', 'dataMax']}
+                allowDataOverflow
               />
               <YAxis
                 dataKey="price"
@@ -274,25 +281,28 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
         </div>
       </div>
 
-      {/* JB 적정 시세 산출 그래프 */}
+      {/* JB 적정시세 추이 + 향후 3개월 예측 (1단계: 동적 가중치 + IQR + 90% 신뢰구간) */}
       <div className="chart-box jb-fair-price-chart">
-        <div className="jb-chart-header">
-          <h4>JB 적정 시세 산출</h4>
-          <div className="jb-chart-info">
-            <span className="jb-formula">KB시세×0.3 + 실거래가×0.6 + 매매호가×0.1</span>
-            <span className="jb-current-price">현재 적정시세: <strong>{formatPrice(latestJbPrice)}</strong></span>
-            <span className={`jb-trend ${isUptrend ? 'up' : 'down'}`}>
-              {isUptrend ? '▲ 상승추세 (연 5%)' : '▼ 하락추세 (연 5%)'}
-            </span>
+        <div className="jb-chart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <h4>JB 적정 시세 추이 · 3개월 예측</h4>
+          <div style={{ fontSize: 11, color: '#666' }}>
+            <span style={{ marginRight: 12 }}>KB <strong style={{ color: '#006FBD' }}>{Math.round((jbWeights.kb || 0) * 100)}%</strong></span>
+            <span style={{ marginRight: 12 }}>실거래 <strong style={{ color: '#7DCCE5' }}>{Math.round((jbWeights.molit || 0) * 100)}%</strong></span>
+            <span style={{ marginRight: 12 }}>호가 <strong style={{ color: '#051C48' }}>{Math.round((jbWeights.naver || 0) * 100)}%</strong></span>
+            <span>현재 <strong style={{ color: '#FF8C00' }}>{formatPrice(latestJbPrice)}</strong></span>
           </div>
         </div>
-        <ResponsiveContainer width="100%" height={280}>
-          <LineChart data={jbData}>
+        <ResponsiveContainer width="100%" height={240}>
+          <ComposedChart data={jbCombined}>
             <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
             <XAxis
-              dataKey="dateLabel"
+              dataKey="ts"
+              type="number"
+              domain={[startTs, jbEndTs]}
+              ticks={jbXTicks}
+              tickFormatter={xTickFormatter}
               tick={{ fontSize: 10 }}
-              interval={Math.floor(jbData.length / 6)}
+              allowDataOverflow
             />
             <YAxis
               domain={[jbYMin, jbYMax]}
@@ -300,33 +310,68 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
               tick={{ fontSize: 10 }}
               width={65}
             />
-            <Tooltip content={<JbTooltip />} />
-            <Legend
-              verticalAlign="top"
-              align="right"
-              wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+            <Tooltip
+              content={({ active, payload }: any) => {
+                if (!active || !payload || !payload.length) return null;
+                const p = payload[0].payload;
+                return (
+                  <div className="chart-tooltip">
+                    <p className="tooltip-label">{p.date}</p>
+                    {p.history && <p className="tooltip-value" style={{ color: '#FF8C00' }}>실측 JB: {formatPrice(p.history)}</p>}
+                    {p.predicted && <p className="tooltip-value" style={{ color: '#FF8C00' }}>예측: {formatPrice(p.predicted)}</p>}
+                    {p.lower && p.upper && (
+                      <p className="tooltip-value" style={{ color: '#888', fontSize: 11 }}>
+                        90% CI: {formatPrice(p.lower)} ~ {formatPrice(p.upper)}
+                      </p>
+                    )}
+                  </div>
+                );
+              }}
             />
+            <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: 11, paddingBottom: 4 }} />
+            {/* 신뢰구간 Area (반투명) */}
+            <Area
+              type="monotone"
+              dataKey="range"
+              stroke="none"
+              fill="#FF8C00"
+              fillOpacity={0.15}
+              name="90% 신뢰구간"
+              connectNulls={false}
+              isAnimationActive={false}
+            />
+            {/* 실측 라인 */}
             <Line
               type="monotone"
-              dataKey="jbPrice"
+              dataKey="history"
               stroke="#FF8C00"
               strokeWidth={2.5}
-              dot={{ r: 3, fill: '#FF8C00' }}
-              name="JB 적정시세"
+              dot={{ r: 4, fill: '#FF8C00' }}
+              name="실측"
               connectNulls={false}
+              isAnimationActive={false}
             />
+            {/* 예측 라인 (점선) */}
             <Line
               type="monotone"
-              dataKey="predictedPrice"
-              stroke={isUptrend ? '#E74C3C' : '#3498DB'}
+              dataKey="predicted"
+              stroke="#FF8C00"
               strokeWidth={2}
               strokeDasharray="6 4"
-              dot={{ r: 3, fill: isUptrend ? '#E74C3C' : '#3498DB', strokeDasharray: '' }}
-              name={`예측 (${loanDuration}개월, ${isUptrend ? '+' : '-'}5%/년)`}
+              dot={{ r: 3, fill: '#FFF', stroke: '#FF8C00', strokeWidth: 2 }}
+              name="예측"
               connectNulls={false}
+              isAnimationActive={false}
             />
-          </LineChart>
+            {/* 오늘 기준선 */}
+            <ReferenceLine x={endTs} stroke="#999" strokeDasharray="3 3" label={{ value: '오늘', fill: '#666', fontSize: 10, position: 'top' }} />
+          </ComposedChart>
         </ResponsiveContainer>
+        {data.jb_detail?.notes && data.jb_detail.notes.length > 0 && (
+          <div style={{ fontSize: 10, color: '#888', marginTop: 6 }}>
+            {data.jb_detail.notes.join(' · ')}
+          </div>
+        )}
       </div>
     </>
   );

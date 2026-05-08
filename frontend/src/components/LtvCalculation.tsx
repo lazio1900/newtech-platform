@@ -15,9 +15,9 @@ export default function LtvCalculation({ rightsData, creditData, loanAmount, int
   const total = maxBond + tenantDeposit + loan;
 
   const kbEstimated = creditData.kb_price.estimated;
-  const kbLow = creditData.kb_price.low;
+  const jbFair = creditData.jb_fair_price ?? creditData.kb_price.low;
 
-  const ltvJB = kbLow > 0 ? (total / kbLow) * 100 : 0;
+  const ltvJB = jbFair > 0 ? (total / jbFair) * 100 : 0;
   const ltvCurrent = kbEstimated > 0 ? (total / kbEstimated) * 100 : 0;
 
   const formatEok = (value: number): string => {
@@ -77,8 +77,8 @@ export default function LtvCalculation({ rightsData, creditData, loanAmount, int
       <div className="ltv-result-grid">
         <div className="ltv-result-box">
           <div className="ltv-result-header">JB 적정시세 기준</div>
-          <div className="ltv-result-sub">(KB 하한가)</div>
-          <div className="ltv-result-price">{formatEok(kbLow)}</div>
+          <div className="ltv-result-sub">(KB×0.3 + 실거래×0.6 + 호가×0.1)</div>
+          <div className="ltv-result-price">{formatEok(jbFair)}</div>
           <div
             className="ltv-value"
             style={{ color: getLtvColor(ltvJB) }}

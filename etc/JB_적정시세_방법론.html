@@ -1,0 +1,1393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JB 적정시세 산출 방법론</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #002060;
+    --navy-dark: #001040;
+    --navy-mid: #0a3080;
+    --orange: #FF8C00;
+    --orange-light: #FFF0D0;
+    --blue: #1565C0;
+    --blue-light: #E3EEF9;
+    --white: #FFFFFF;
+    --off-white: #F8F9FC;
+    --gray: #64748B;
+    --gray-light: #F1F5F9;
+    --gray-border: #E2E8F0;
+    --text: #1A1A2E;
+    --green: #16A34A;
+    --green-light: #D1FAE5;
+    --red: #DC2626;
+    --red-light: #FEE2E2;
+    --purple: #7C3AED;
+    --purple-light: #EDE9FE;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Noto Sans KR', sans-serif;
+    background: #0a0a1a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── DECK WRAPPER ── */
+  .deck {
+    position: relative;
+    width: min(960px, 96vw);
+    aspect-ratio: 16/9;
+  }
+
+  /* ── SLIDE BASE ── */
+  .slide {
+    position: absolute;
+    inset: 0;
+    border-radius: 8px;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateX(60px) scale(0.97);
+    transition: opacity .45s cubic-bezier(.4,0,.2,1), transform .45s cubic-bezier(.4,0,.2,1);
+    pointer-events: none;
+  }
+  .slide.active {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    pointer-events: auto;
+  }
+  .slide.exit-left {
+    opacity: 0;
+    transform: translateX(-60px) scale(0.97);
+  }
+
+  /* ── COMMON LAYOUT HELPERS ── */
+  .slide-inner { width: 100%; height: 100%; position: relative; }
+
+  .top-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 11.5%;
+    background: var(--navy);
+    display: flex;
+    align-items: center;
+    z-index: 2;
+  }
+  .top-bar::before {
+    content: '';
+    display: block;
+    width: 4px;
+    height: 100%;
+    background: var(--orange);
+    flex-shrink: 0;
+  }
+  .top-bar h2 {
+    padding: 0 16px;
+    font-size: clamp(13px, 2.2vw, 21px);
+    font-weight: 700;
+    color: var(--white);
+    letter-spacing: -.3px;
+  }
+
+  .content-area {
+    position: absolute;
+    top: 11.5%; left: 0; right: 0; bottom: 0;
+    padding: 16px 20px 12px;
+  }
+
+  .tag {
+    display: inline-block;
+    background: var(--orange);
+    color: #fff;
+    font-size: clamp(9px, 1.1vw, 11px);
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 2px;
+  }
+
+  /* 현업 판단 코너 배지 */
+  .decision-corner {
+    position: absolute;
+    top: 12.5%; right: 0;
+    background: #EA580C;
+    color: #fff;
+    font-size: clamp(8px,1vw,10px);
+    font-weight: 900;
+    padding: 4px 12px 4px 10px;
+    border-radius: 0 0 0 6px;
+    z-index: 10;
+    display: flex; align-items: center; gap: 5px;
+    letter-spacing: .3px;
+    box-shadow: -2px 2px 8px rgba(234,88,12,.35);
+    animation: pulse-badge 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse-badge {
+    0%,100% { box-shadow: -2px 2px 8px rgba(234,88,12,.35); }
+    50%      { box-shadow: -2px 2px 16px rgba(234,88,12,.65); }
+  }
+  .dot.dot-decision:not(.active) { background: rgba(234,88,12,.55); }
+
+  /* 현업 판단 배지 */
+  .decision-box {
+    background: #FFF7ED;
+    border: 2px solid #F97316;
+    border-left: 5px solid #F97316;
+    border-radius: 5px;
+    padding: 8px 14px;
+    font-size: clamp(9px,1.1vw,11px);
+    color: #7C2D12;
+    line-height: 1.6;
+    position: relative;
+  }
+  .decision-box .db-title {
+    font-size: clamp(9px,1.15vw,11.5px);
+    font-weight: 900;
+    color: #EA580C;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 5px;
+    letter-spacing: .2px;
+  }
+  .decision-box .db-badge {
+    display: inline-block;
+    background: #EA580C;
+    color: #fff;
+    font-size: clamp(7px,.9vw,9px);
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 20px;
+    letter-spacing: .5px;
+  }
+  .decision-box ul {
+    padding-left: 14px;
+    margin: 0;
+  }
+  .decision-box ul li {
+    margin-bottom: 2px;
+  }
+
+  .note-box {
+    background: var(--orange-light);
+    border: 1.5px solid var(--orange);
+    border-radius: 4px;
+    padding: 8px 14px;
+    font-size: clamp(9px, 1.1vw, 11px);
+    color: var(--navy);
+    line-height: 1.55;
+  }
+
+  /* ── NAVIGATION ── */
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .nav-btn {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.3);
+    background: rgba(255,255,255,.07);
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .2s, border-color .2s, transform .15s;
+    backdrop-filter: blur(4px);
+  }
+  .nav-btn:hover { background: var(--orange); border-color: var(--orange); transform: scale(1.08); }
+  .nav-btn:disabled { opacity: .3; cursor: default; }
+  .nav-btn:disabled:hover { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.3); transform: none; }
+
+  .slide-counter {
+    color: rgba(255,255,255,.7);
+    font-size: 13px;
+    font-weight: 500;
+    min-width: 60px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .dot-nav {
+    display: flex; gap: 6px; align-items: center;
+  }
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.25);
+    cursor: pointer;
+    transition: background .2s, transform .2s;
+  }
+  .dot.active { background: var(--orange); transform: scale(1.35); }
+  .dot:hover:not(.active) { background: rgba(255,255,255,.5); }
+
+  /* keyboard hint */
+  .kbd-hint {
+    color: rgba(255,255,255,.35);
+    font-size: 11px;
+    margin-left: auto;
+  }
+
+  /* ══════════════════════════════════════
+     SLIDE 1 — TITLE
+  ══════════════════════════════════════ */
+  #s1 { background: var(--navy); }
+  #s1 .accent-bar {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 5px;
+    background: var(--orange);
+  }
+  #s1 .circle1 {
+    position: absolute;
+    width: 42%; aspect-ratio: 1;
+    border-radius: 50%;
+    background: rgba(255,255,255,.04);
+    right: -8%; top: -20%;
+  }
+  #s1 .circle2 {
+    position: absolute;
+    width: 28%; aspect-ratio: 1;
+    border-radius: 50%;
+    background: rgba(255,255,255,.06);
+    right: 2%; top: -5%;
+  }
+  #s1 .s1-content {
+    position: absolute;
+    left: 6%; top: 14%;
+  }
+  #s1 .s1-tag {
+    display: inline-block;
+    background: var(--orange);
+    color: #fff;
+    font-size: clamp(9px, 1.1vw, 11px);
+    font-weight: 700;
+    padding: 3px 12px;
+    border-radius: 2px;
+    margin-bottom: 16px;
+  }
+  #s1 .s1-title {
+    font-size: clamp(32px, 6.5vw, 62px);
+    font-weight: 900;
+    color: var(--white);
+    line-height: 1.05;
+    letter-spacing: -1px;
+  }
+  #s1 .s1-title span { color: var(--orange); }
+  #s1 .s1-sub {
+    margin-top: 18px;
+    font-size: clamp(10px, 1.4vw, 14px);
+    color: #AECEF5;
+    line-height: 1.65;
+    font-weight: 400;
+  }
+  #s1 .s1-footer {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 8%;
+    background: var(--navy-dark);
+    display: flex; align-items: center;
+    padding: 0 6%;
+  }
+  #s1 .s1-footer span {
+    font-size: clamp(8px, 1vw, 10px);
+    color: #8899BB;
+  }
+
+  /* ══════════════════════════════════════
+     SLIDE 2 — 현재 한계
+  ══════════════════════════════════════ */
+  #s2 { background: var(--off-white); }
+  .formula-box {
+    background: var(--blue-light);
+    border: 1.5px solid #BFCFE8;
+    border-radius: 6px;
+    padding: 10px 16px 12px;
+    margin-bottom: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  }
+  .formula-label { font-size: clamp(8px, 1vw, 10px); color: var(--blue); font-weight: 700; margin-bottom: 4px; }
+  .formula-eq {
+    font-size: clamp(11px, 1.8vw, 17px);
+    font-weight: 700;
+    color: var(--navy);
+    text-align: center;
+  }
+  .problem-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    flex: 1;
+  }
+  .problem-card {
+    background: var(--white);
+    border: 1.5px solid #FCA5A5;
+    border-radius: 6px;
+    padding: 14px 12px;
+    display: flex; flex-direction: column; align-items: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    position: relative;
+    overflow: hidden;
+  }
+  .problem-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--red);
+  }
+  .warn-icon { font-size: clamp(20px, 3vw, 28px); margin-bottom: 6px; }
+  .problem-card h4 { font-size: clamp(10px, 1.3vw, 13px); color: var(--red); font-weight: 700; text-align: center; margin-bottom: 6px; }
+  .problem-card p { font-size: clamp(9px, 1.1vw, 11px); color: var(--gray); text-align: center; line-height: 1.6; }
+
+  /* ══════════════════════════════════════
+     SLIDE 3 — 데이터 소스
+  ══════════════════════════════════════ */
+  #s3 { background: var(--off-white); }
+  .sources-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    height: 100%;
+  }
+  .source-card {
+    background: var(--white);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0,0,0,.08);
+    display: flex; flex-direction: column;
+  }
+  .source-header {
+    padding: 10px 12px;
+    color: var(--white);
+  }
+  .source-header h3 { font-size: clamp(12px, 1.6vw, 16px); font-weight: 700; }
+  .source-header p { font-size: clamp(8px, 1vw, 10px); opacity: .75; margin-top: 2px; }
+  .source-body { padding: 10px 12px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .source-section-label { font-size: clamp(8px, 1vw, 10px); font-weight: 700; margin-bottom: 2px; }
+  .source-item {
+    font-size: clamp(8px, 1.05vw, 10.5px);
+    color: var(--text);
+    line-height: 1.5;
+    display: flex; gap: 4px;
+  }
+  .source-item .check { font-weight: 700; flex-shrink: 0; }
+  .source-role {
+    margin-top: auto;
+    text-align: center;
+    font-size: clamp(8px, 1vw, 10px);
+    font-weight: 700;
+    padding: 5px 8px;
+    border-radius: 3px;
+  }
+
+  /* ══════════════════════════════════════
+     SLIDE 4 — 동적 가중치
+  ══════════════════════════════════════ */
+  #s4 { background: var(--off-white); }
+  .concept-quote {
+    background: var(--navy);
+    color: var(--white);
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-size: clamp(10px, 1.5vw, 14px);
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 12px;
+    line-height: 1.5;
+  }
+  .concept-quote span { color: var(--orange); }
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 44px 1fr;
+    gap: 0;
+    align-items: start;
+  }
+  .cmp-card {
+    background: var(--white);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,.07);
+  }
+  .cmp-header {
+    padding: 8px 12px;
+    color: var(--white);
+    font-size: clamp(10px, 1.3vw, 13px);
+    font-weight: 700;
+  }
+  .cmp-header.bad { background: var(--red); }
+  .cmp-header.good { background: var(--green); }
+  .cmp-row {
+    display: flex; justify-content: space-between;
+    padding: 5px 12px;
+    border-bottom: 1px solid var(--gray-light);
+    font-size: clamp(8px, 1.05vw, 10.5px);
+  }
+  .cmp-row .label { color: var(--text); }
+  .cmp-row .val-bad { color: var(--red); font-weight: 700; }
+  .cmp-row .val-good { color: var(--green); font-weight: 700; }
+  .vs-divider {
+    display: flex; align-items: center; justify-content: center;
+    font-size: clamp(14px, 2vw, 18px);
+    font-weight: 900;
+    color: var(--orange);
+    padding-top: 40px;
+  }
+
+  /* ══════════════════════════════════════
+     SLIDE 5 — 시간 감쇠
+  ══════════════════════════════════════ */
+  #s5 { background: var(--off-white); }
+  .desc-text {
+    font-size: clamp(9px, 1.15vw, 11.5px);
+    color: var(--gray);
+    line-height: 1.6;
+    margin-bottom: 14px;
+  }
+  .timeline-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 12px;
+  }
+  .tl-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .tl-bar-wrap {
+    width: 100%;
+    height: clamp(80px, 12vw, 115px);
+    display: flex; align-items: flex-end;
+  }
+  .tl-bar {
+    width: 100%;
+    border-radius: 4px 4px 0 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--white);
+    font-weight: 700;
+    font-size: clamp(12px, 2vw, 19px);
+    transition: height .6s cubic-bezier(.4,0,.2,1);
+  }
+  .tl-label { font-size: clamp(9px, 1.2vw, 12px); color: var(--navy); font-weight: 700; text-align: center; }
+  .tl-sub { font-size: clamp(7px, .9vw, 9px); color: var(--gray); text-align: center; }
+  .tl-badge {
+    font-size: clamp(7px, .9vw, 9px);
+    font-weight: 700;
+    color: var(--white);
+    padding: 3px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  /* ══════════════════════════════════════
+     SLIDE 6 — 매물 수
+  ══════════════════════════════════════ */
+  #s6 { background: var(--off-white); }
+  .listing-compare {
+    display: grid;
+    grid-template-columns: 1fr 44px 1fr;
+    gap: 0;
+    height: calc(100% - 36px);
+  }
+  .listing-card {
+    background: var(--white);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,.07);
+    display: flex; flex-direction: column;
+  }
+  .listing-header {
+    padding: 8px 12px;
+    color: var(--white);
+    font-size: clamp(10px, 1.35vw, 13px);
+    font-weight: 700;
+  }
+  .listing-body { padding: 10px 12px; flex: 1; }
+  .listing-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--gray-light);
+    font-size: clamp(8px, 1.05vw, 10.5px);
+  }
+  .listing-row .price { font-weight: 600; color: var(--text); }
+  .bar-mini {
+    height: 6px;
+    border-radius: 3px;
+    margin: 2px 0 6px;
+    transition: width .5s ease;
+  }
+  .listing-avg {
+    font-size: clamp(10px, 1.35vw, 13px);
+    font-weight: 700;
+    color: var(--navy);
+    padding: 6px 0 4px;
+  }
+  .listing-verdict {
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: clamp(8px, 1.05vw, 10.5px);
+    line-height: 1.5;
+    margin-top: 4px;
+  }
+
+  /* ══════════════════════════════════════
+     SLIDE 7 — 이상치
+  ══════════════════════════════════════ */
+  #s7 { background: var(--off-white); }
+  .iqr-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    height: calc(100% - 36px);
+  }
+  .iqr-method {
+    background: var(--blue-light);
+    border: 1.5px solid #90B4D8;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  }
+  .iqr-method-header {
+    background: var(--blue);
+    padding: 8px 14px;
+    color: var(--white);
+    font-size: clamp(10px, 1.35vw, 13px);
+    font-weight: 700;
+  }
+  .iqr-method-body { padding: 10px 14px; }
+  .iqr-step {
+    font-size: clamp(8px, 1.1vw, 11px);
+    color: var(--navy);
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(0,0,0,.06);
+    line-height: 1.5;
+  }
+  .iqr-example {
+    background: var(--white);
+    border: 1.5px solid var(--gray-border);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  }
+  .iqr-example-header {
+    background: var(--navy);
+    padding: 8px 14px;
+    color: var(--white);
+    font-size: clamp(10px, 1.35vw, 13px);
+    font-weight: 700;
+  }
+  .iqr-example-body { padding: 8px 14px; }
+  .ex-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 8px;
+    border-radius: 3px;
+    margin-bottom: 3px;
+    font-size: clamp(8px, 1.1vw, 11px);
+  }
+  .ex-row.normal { background: #F0FFF4; }
+  .ex-row.outlier { background: #FEF2F2; }
+  .ex-row .ex-price { font-weight: 600; }
+  .ex-row.normal .ex-price { color: var(--text); }
+  .ex-row.outlier .ex-price { color: var(--red); font-weight: 700; }
+  .ex-row .ex-flag { font-size: clamp(7px, .95vw, 9.5px); }
+  .ex-row.normal .ex-flag { color: var(--green); }
+  .ex-row.outlier .ex-flag { color: var(--red); font-weight: 700; }
+  .iqr-result {
+    background: var(--navy);
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: var(--white);
+    font-size: clamp(8px, 1.05vw, 10.5px);
+    line-height: 1.6;
+    margin-top: 6px;
+  }
+
+  /* ══════════════════════════════════════
+     SLIDE 8 — 통계 기반
+  ══════════════════════════════════════ */
+  #s8 { background: var(--off-white); }
+  .stat-flow {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr) ;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .stat-step {
+    background: var(--white);
+    border: 1.5px solid var(--gray-border);
+    border-radius: 6px;
+    padding: 12px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    position: relative;
+  }
+  .stat-step::after {
+    content: '→';
+    position: absolute;
+    right: -14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--orange);
+    font-weight: 900;
+    font-size: clamp(12px, 1.6vw, 15px);
+    z-index: 1;
+  }
+  .stat-step:last-child::after { display: none; }
+  .stat-num {
+    width: clamp(28px, 4vw, 38px);
+    height: clamp(28px, 4vw, 38px);
+    border-radius: 50%;
+    background: var(--navy);
+    color: var(--white);
+    display: flex; align-items: center; justify-content: center;
+    font-size: clamp(13px, 1.8vw, 17px);
+    font-weight: 700;
+  }
+  .stat-step h4 { font-size: clamp(9px, 1.2vw, 12px); color: var(--navy); font-weight: 700; text-align: center; }
+  .stat-step p { font-size: clamp(7px, .95vw, 9.5px); color: var(--gray); text-align: center; line-height: 1.55; }
+  .stat-highlight {
+    background: var(--orange-light);
+    border: 1.5px solid var(--orange);
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-size: clamp(9px, 1.15vw, 11.5px);
+    color: var(--navy);
+    line-height: 1.6;
+  }
+  .stat-highlight strong { color: var(--orange); }
+
+  /* ══════════════════════════════════════
+     SLIDE 9 — 단지+평수
+  ══════════════════════════════════════ */
+  #s9 { background: var(--off-white); }
+  .unit-note {
+    background: var(--blue-light);
+    border: 1.5px solid #90B4D8;
+    border-radius: 5px;
+    padding: 8px 14px;
+    font-size: clamp(9px, 1.1vw, 11px);
+    color: var(--blue);
+    line-height: 1.55;
+    margin-bottom: 12px;
+  }
+  .hierarchy {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .h-row {
+    display: flex; align-items: center;
+    background: var(--white);
+    border-radius: 5px;
+    overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0,0,0,.06);
+  }
+  .h-accent { width: 5px; flex-shrink: 0; align-self: stretch; }
+  .h-badge {
+    flex-shrink: 0;
+    margin: 8px 10px;
+    padding: 3px 9px;
+    border-radius: 3px;
+    color: var(--white);
+    font-size: clamp(7px, .95vw, 9.5px);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .h-label { font-size: clamp(10px, 1.35vw, 13px); font-weight: 700; color: var(--navy); flex: 1; }
+  .h-cond { font-size: clamp(8px, 1.05vw, 10.5px); color: var(--gray); padding-right: 14px; white-space: nowrap; }
+  .unit-tip {
+    margin-top: 10px;
+    font-size: clamp(9px, 1.1vw, 11px);
+    color: var(--orange);
+    font-weight: 700;
+    font-style: italic;
+  }
+
+  /* ══════════════════════════════════════
+     SLIDE 10 — 로드맵
+  ══════════════════════════════════════ */
+  #s10 { background: var(--off-white); }
+  .flow-strip {
+    display: flex;
+    gap: 0;
+    margin-bottom: 14px;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .flow-node {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 8px 6px;
+    color: var(--white);
+    position: relative;
+  }
+  .flow-node::after {
+    content: '▶';
+    position: absolute;
+    right: -9px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: rgba(255,255,255,.5);
+    z-index: 2;
+  }
+  .flow-node:last-child::after { display: none; }
+  .flow-node h4 { font-size: clamp(9px, 1.2vw, 12px); font-weight: 700; }
+  .flow-node p { font-size: clamp(7px, .9vw, 9px); opacity: .8; margin-top: 2px; }
+  .roadmap-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .rm-card {
+    background: var(--white);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,.07);
+  }
+  .rm-header {
+    padding: 8px 12px;
+    color: var(--white);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .rm-phase { font-size: clamp(10px, 1.35vw, 13px); font-weight: 700; }
+  .rm-dur { font-size: clamp(8px, 1vw, 10px); opacity: .8; }
+  .rm-body { padding: 10px 12px; }
+  .rm-body h4 { font-size: clamp(9px, 1.2vw, 12px); font-weight: 700; color: var(--navy); margin-bottom: 7px; }
+  .rm-item {
+    font-size: clamp(8px, 1.05vw, 10.5px);
+    color: var(--text);
+    padding: 3px 0;
+    display: flex; gap: 5px;
+    border-bottom: 1px solid var(--gray-light);
+    line-height: 1.45;
+  }
+  .rm-item .dot-bullet { flex-shrink: 0; font-weight: 700; }
+
+  /* ══════════════════════════════════════
+     SLIDE 11 — CLOSING
+  ══════════════════════════════════════ */
+  #s11 { background: var(--navy); }
+  #s11 .accent-bar {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 5px; background: var(--orange);
+  }
+  #s11 .circle1 {
+    position: absolute;
+    width: 55%; aspect-ratio: 1;
+    border-radius: 50%;
+    background: rgba(255,255,255,.03);
+    right: -15%; bottom: -25%;
+  }
+  #s11 .close-label {
+    position: absolute;
+    top: 14%; left: 6%;
+    font-size: clamp(10px, 1.3vw, 13px);
+    color: var(--orange);
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  #s11 .close-items {
+    position: absolute;
+    top: 24%; left: 6%; right: 6%;
+  }
+  .close-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    margin-bottom: 10px;
+    animation: fadeUp .5s ease both;
+  }
+  .close-num {
+    width: clamp(22px, 3vw, 30px);
+    height: clamp(22px, 3vw, 30px);
+    background: var(--orange);
+    border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--white);
+    font-weight: 700;
+    font-size: clamp(10px, 1.3vw, 13px);
+    flex-shrink: 0;
+  }
+  .close-text {
+    font-size: clamp(10px, 1.4vw, 14px);
+    color: #D0E4FF;
+    line-height: 1.5;
+    padding-top: 2px;
+  }
+  #s11 .s11-footer {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 8%;
+    background: var(--navy-dark);
+    display: flex; align-items: center; padding: 0 6%;
+  }
+  #s11 .s11-footer span { font-size: clamp(8px, 1vw, 10px); color: #8899BB; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* stagger delays for close rows */
+  .close-row:nth-child(1) { animation-delay: .05s; }
+  .close-row:nth-child(2) { animation-delay: .15s; }
+  .close-row:nth-child(3) { animation-delay: .25s; }
+  .close-row:nth-child(4) { animation-delay: .35s; }
+  .close-row:nth-child(5) { animation-delay: .45s; }
+
+  /* progress bar */
+  .progress-bar {
+    width: min(960px, 96vw);
+    height: 3px;
+    background: rgba(255,255,255,.1);
+    border-radius: 2px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--orange);
+    border-radius: 2px;
+    transition: width .4s cubic-bezier(.4,0,.2,1);
+  }
+</style>
+</head>
+<body>
+
+<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+<div class="deck" id="deck">
+
+  <!-- ══ SLIDE 1 ══ -->
+  <div class="slide active" id="s1">
+    <div class="slide-inner">
+      <div class="accent-bar"></div>
+      <div class="circle1"></div>
+      <div class="circle2"></div>
+      <div class="s1-content">
+        <div class="s1-tag">방법론 설명자료</div>
+        <div class="s1-title">JB 적정시세<br><span>산출 방법론</span></div>
+        <div class="s1-sub">KB시세 · 실거래가 · 매매호가 데이터를 활용한<br>보수적이고 신뢰 가능한 적정시세 산출 체계</div>
+      </div>
+      <div class="s1-footer"><span>JB우리캐피탈  |  담보금융심사팀  |  내부 기획자료</span></div>
+    </div>
+  </div>
+
+  <!-- ══ SLIDE 2 ══ -->
+  <div class="slide" id="s2">
+    <div class="slide-inner">
+      <div class="top-bar"><h2>현재 방식과 한계</h2></div>
+      <div class="content-area" style="display:flex;flex-direction:column;">
+        <div class="formula-box">
+          <div class="formula-label">현재 공식</div>
+          <div class="formula-eq">KB시세 × 0.3 &nbsp;+&nbsp; 실거래가 × 0.6 &nbsp;+&nbsp; 매매호가 × 0.1 &nbsp;=&nbsp; JB 적정시세</div>
+        </div>
+        <div class="problem-grid" style="flex:1;">
+          <div class="problem-card">
+            <div class="warn-icon">⚠️</div>
+            <h4>가중치 고정</h4>
+            <p>어떤 시장 상황이든 항상 같은 비율 적용<br>시장 변화에 무감각</p>
+          </div>
+          <div class="problem-card">
+            <div class="warn-icon">⚠️</div>
+            <h4>데이터 신선도 무시</h4>
+            <p>6개월 전 실거래가도 어제 거래처럼 동일하게 처리됨</p>
+          </div>
+          <div class="problem-card">
+            <div class="warn-icon">⚠️</div>
+            <h4>매물 신뢰도 무시</h4>
+            <p>매물 2건인 단지와 매물 50건인 단지를 같은 신뢰도로 처리</p>
+          </div>
+        </div>
+        <div class="note-box" style="margin-top:10px;">
+          → &nbsp;시장이 비정상일 때, 데이터가 불완전할 때 가장 크게 틀릴 수 있습니다. 그게 바로 심사에서 가장 중요한 순간입니다.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SLIDE 3 ══ -->
+  <div class="slide" id="s3">
+    <div class="slide-inner">
+      <div class="top-bar"><h2>3가지 데이터 소스의 특성</h2></div>
+      <div class="content-area">
+        <div class="sources-grid">
+
+          <div class="source-card">
+            <div class="source-header" style="background:#1565C0;">
+              <h3>KB 시세</h3>
+              <p>추정가 / 하한가 / 상한가</p>
+            </div>
+            <div class="source-body">
+              <div class="source-section-label" style="color:var(--green);">강점</div>
+              <div class="source-item"><span class="check" style="color:var(--green);">✓</span>월별 연속 데이터 제공</div>
+              <div class="source-item"><span class="check" style="color:var(--green);">✓</span>추정가·하한가·상한가 범위 제공</div>
+              <div class="source-item"><span class="check" style="color:var(--green);">✓</span>전국 단지 커버리지 우수</div>
+              <div class="source-section-label" style="color:var(--red);margin-top:6px;">한계</div>
+              <div class="source-item"><span class="check" style="color:var(--red);">✗</span>실제 거래 아님 (추정치)</div>
+              <div class="source-item"><span class="check" style="color:var(--red);">✗</span>시장 급변 시 후행 반영</div>
+              <div class="source-role" style="background:#E3EEF9;color:#1565C0;">기준선 역할 · 연속성 담당</div>
+            </div>
+          </div>
+
+          <div class="source-card">
+            <div class="source-header" style="background:#047857;">
+              <h3>국토부 실거래가</h3>
+              <p>실제 계약 체결 금액</p>
+            </div>
+            <div class="source-body">
+              <div class="source-section-label" style="color:var(--green);">강점</div>
+              <div class="source-item"><span class="check" style="color:var(--green);">✓</span>실제 계약된 금액</div>
+              <div class="source-item"><span class="check" style="color:var(--green);">✓</span>가장 객관적·신뢰도 높음</div>
+              <div class="source-item"><span class="check" style="color:var(--green);">✓</span>단지·평형·층별 세분화</div>
+              <div class="source-section-label" style="color:var(--red);margin-top:6px;">한계</div>
+              <div class="source-item"><span class="check" style="color:var(--red);">✗</span>거래 빈도 낮으면 공백 발생</div>
+              <div class="source-item"><span class="check" style="color:var(--red);">✗</span>최신 거래까지 수개월 공백</div>
+              <div class="source-role" style="background:#D1FAE5;color:#047857;">신뢰도 핵심 · 가장 높은 가중치</div>
+            </div>
+          </div>
+
+          <div class="source-card">
+            <div class="source-header" style="background:#7C3AED;">
+              <h3>네이버 매매호가</h3>
+              <p>현재 시장 매도 희망가</p>
+            </div>
+            <div class="source-body">
+              <div class="source-section-label" style="color:var(--green);">강점</div>
+              <div class="source-item"><span class="check" style="color:var(--green);">✓</span>가장 최신 시장 분위기 반영</div>
+              <div class="source-item"><span class="check" style="color:var(--green);">✓</span>공급(매물) 상황 즉시 파악</div>
+              <div class="source-item"><span class="check" style="color:var(--green);">✓</span>거래 없어도 데이터 존재</div>
+              <div class="source-section-label" style="color:var(--red);margin-top:6px;">한계</div>
+              <div class="source-item"><span class="check" style="color:var(--red);">✗</span>집주인 희망가 → 상승 편향</div>
+              <div class="source-item"><span class="check" style="color:var(--red);">✗</span>매물 수 적으면 왜곡 위험</div>
+              <div class="source-role" style="background:#EDE9FE;color:#7C3AED;">현재 분위기 반영 · 보조 역할</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SLIDE 4 ══ -->
+  <div class="slide" id="s4">
+    <div class="slide-inner">
+      <div class="top-bar"><h2>핵심 아이디어 : 동적 가중치</h2></div>
+      <div class="content-area" style="display:flex;flex-direction:column;">
+        <div class="concept-quote">
+          "가중치를 고정하지 않고, &nbsp;<span>데이터 신뢰도에 따라 자동으로 조정</span>한다"
+        </div>
+        <div class="compare-grid" style="flex:1;">
+          <div class="cmp-card">
+            <div class="cmp-header bad">❌ &nbsp;지금 (고정 가중치)</div>
+            <div class="cmp-row"><span class="label">실거래가가 1년 전 데이터여도</span><span class="val-bad">→ 60% 적용</span></div>
+            <div class="cmp-row"><span class="label">매물이 단 1건뿐이어도</span><span class="val-bad">→ 10% 적용</span></div>
+            <div class="cmp-row"><span class="label">거래 활발한 대단지여도</span><span class="val-bad">→ 30% 적용</span></div>
+            <div class="cmp-row" style="border:none;"><span class="label">침체장이든 급등장이든</span><span class="val-bad">→ 동일한 공식</span></div>
+          </div>
+          <div class="vs-divider">VS</div>
+          <div class="cmp-card">
+            <div class="cmp-header good">✅ &nbsp;개선 후 (동적 가중치)</div>
+            <div class="cmp-row"><span class="label">실거래가가 1년 전이면</span><span class="val-good">→ 신뢰도 자동 감소</span></div>
+            <div class="cmp-row"><span class="label">매물이 적으면</span><span class="val-good">→ 호가 영향 자동 감소</span></div>
+            <div class="cmp-row"><span class="label">거래 많고 데이터 풍부하면</span><span class="val-good">→ 실거래 비중 증가</span></div>
+            <div class="cmp-row" style="border:none;"><span class="label">데이터 부족 시</span><span class="val-good">→ KB시세 비중 보완</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SLIDE 5 ══ -->
+  <div class="slide" id="s5">
+    <div class="slide-inner">
+      <div class="top-bar"><h2>실거래가 신뢰도 : 시간이 지날수록 낮아진다</h2></div>
+      <div class="decision-corner">✋ 현업 판단 필요</div>
+      <div class="content-area" style="display:flex;flex-direction:column;">
+        <div class="desc-text">실거래가는 '언제 거래됐는가'에 따라 현재 시세를 반영하는 정도가 달라집니다. 최근 거래일수록 신뢰도가 높고, 오래된 거래일수록 참고 수준으로 반영합니다.</div>
+        <div class="timeline-grid" style="flex:1;align-items:end;">
+          <div class="tl-col">
+            <div class="tl-bar-wrap">
+              <div class="tl-bar" style="height:100%;background:var(--green);">100%</div>
+            </div>
+            <div class="tl-label">3개월 이내</div>
+            <div class="tl-sub">현재 시장 그대로</div>
+            <div class="tl-badge" style="background:var(--green);">신뢰도 : 높음</div>
+          </div>
+          <div class="tl-col">
+            <div class="tl-bar-wrap">
+              <div class="tl-bar" style="height:70%;background:var(--orange);">70%</div>
+            </div>
+            <div class="tl-label">3~6개월</div>
+            <div class="tl-sub">약간 오래됨</div>
+            <div class="tl-badge" style="background:var(--orange);">신뢰도 : 중간</div>
+          </div>
+          <div class="tl-col">
+            <div class="tl-bar-wrap">
+              <div class="tl-bar" style="height:45%;background:#EA580C;">45%</div>
+            </div>
+            <div class="tl-label">6~12개월</div>
+            <div class="tl-sub">시장 변화 가능성</div>
+            <div class="tl-badge" style="background:#EA580C;">신뢰도 : 낮음</div>
+          </div>
+          <div class="tl-col">
+            <div class="tl-bar-wrap">
+              <div class="tl-bar" style="height:20%;background:var(--red);">20%</div>
+            </div>
+            <div class="tl-label">12개월 초과</div>
+            <div class="tl-sub">현재와 큰 차이 가능</div>
+            <div class="tl-badge" style="background:var(--red);">신뢰도 : 매우 낮음</div>
+          </div>
+        </div>
+        <div class="decision-box" style="margin-top:10px;">
+          <div class="db-title">✋ 현업 판단 필요 <span class="db-badge">슬라이드 5</span></div>
+          <ul>
+            <li>막대 그래프의 수치(100% / 70% / 45% / 20%)는 예시입니다. <strong>각 구간별 실제 신뢰도를 심사역 경험 기준으로 결정</strong>해주세요.</li>
+            <li>예: "3~6개월 실거래는 현재 시세의 몇 %로 반영해야 적절한가?"</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SLIDE 6 ══ -->
+  <div class="slide" id="s6">
+    <div class="slide-inner">
+      <div class="top-bar"><h2>매매호가 신뢰도 : 매물이 많을수록 신뢰한다</h2></div>
+      <div class="decision-corner">✋ 현업 판단 필요</div>
+      <div class="content-area" style="display:flex;flex-direction:column;">
+        <div class="desc-text" style="margin-bottom:10px;">매물이 1~2건이면 특정 집주인의 희망가에 불과합니다. 매물이 많을수록 시장가격에 가까워집니다.</div>
+        <div class="listing-compare" style="flex:1;">
+          <div class="listing-card">
+            <div class="listing-header" style="background:var(--red);">😰 &nbsp;매물 2건인 단지</div>
+            <div class="listing-body">
+              <div style="font-size:clamp(8px,1vw,10px);color:var(--gray);font-weight:700;margin-bottom:4px;">호가 현황</div>
+              <div class="listing-row"><span class="price">집주인 A : 8억 5천만원</span><span style="font-size:clamp(7px,.9vw,9px);color:var(--red);">1건</span></div>
+              <div class="listing-row"><span class="price">집주인 B : 9억 2천만원</span><span style="font-size:clamp(7px,.9vw,9px);color:var(--red);">1건</span></div>
+              <div class="listing-avg">평균 호가 : 8억 8,500만원</div>
+              <div class="listing-verdict" style="background:var(--red-light);color:var(--red);">
+                ⚠ 집주인 2명의 희망가가 시세에 반영됨<br>→ 신뢰 불가
+              </div>
+            </div>
+          </div>
+          <div class="vs-divider">VS</div>
+          <div class="listing-card">
+            <div class="listing-header" style="background:var(--green);">😊 &nbsp;매물 30건인 단지</div>
+            <div class="listing-body">
+              <div style="font-size:clamp(8px,1vw,10px);color:var(--gray);font-weight:700;margin-bottom:4px;">호가 분포</div>
+              <div style="font-size:clamp(8px,1.05vw,10.5px);color:var(--text);margin-bottom:2px;">8억~8억 5천 (12건)</div>
+              <div class="bar-mini" style="width:100%;background:#1E8449;"></div>
+              <div style="font-size:clamp(8px,1.05vw,10.5px);color:var(--text);margin-bottom:2px;">8억 5천~9억 (10건)</div>
+              <div class="bar-mini" style="width:83%;background:#27AE60;"></div>
+              <div style="font-size:clamp(8px,1.05vw,10.5px);color:var(--text);margin-bottom:2px;">9억~9억 5천 (6건)</div>
+              <div class="bar-mini" style="width:50%;background:#52BE80;"></div>
+              <div style="font-size:clamp(8px,1.05vw,10.5px);color:var(--text);margin-bottom:2px;">9억 5천 이상 (2건)</div>
+              <div class="bar-mini" style="width:17%;background:#A9DFBF;"></div>
+              <div class="listing-avg">평균 호가 : 8억 7,000만원</div>
+              <div class="listing-verdict" style="background:var(--green-light);color:var(--green);">
+                ✓ 30건 집주인의 집합적 판단<br>→ 시장 가격에 근접 → 신뢰 가능
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="decision-box" style="margin-top:10px;">
+          <div class="db-title">✋ 현업 판단 필요 <span class="db-badge">슬라이드 6</span></div>
+          <ul>
+            <li><strong>기준 매물 수를 몇 건으로 설정할지</strong> 결정 필요 (예시는 20건 기준)</li>
+            <li>단지 규모에 따라 다를 수 있음 — 대단지(1,000세대+)와 소단지(100세대 이하)의 기준을 달리 볼지 여부도 판단 필요</li>
+          </ul>
+        </div>
+  <div class="slide" id="s7">
+    <div class="slide-inner">
+      <div class="top-bar"><h2>이상치 제거 : 비정상 거래를 걸러낸다</h2></div>
+      <div class="content-area" style="display:flex;flex-direction:column;">
+        <div class="desc-text">가족 간 거래, 급매, 경매 등 비정상적 거래가 평균을 왜곡합니다. 통계적으로 이상치를 자동 제거합니다.</div>
+        <div class="iqr-grid" style="flex:1;">
+          <div class="iqr-method">
+            <div class="iqr-method-header">IQR 방식이란?</div>
+            <div class="iqr-method-body">
+              <div class="iqr-step">① 거래가를 낮은 순 → 높은 순으로 정렬</div>
+              <div class="iqr-step">② 하위 25% 가격(Q1) 과 상위 75% 가격(Q3) 파악</div>
+              <div class="iqr-step">③ 그 차이 &nbsp;IQR = Q3 - Q1 &nbsp;계산</div>
+              <div class="iqr-step" style="color:var(--red);">④ Q1 - 1.5×IQR 이하 → 비정상 저가 제거</div>
+              <div class="iqr-step" style="color:var(--red);border:none;">⑤ Q3 + 1.5×IQR 이상 → 비정상 고가 제거</div>
+            </div>
+          </div>
+          <div class="iqr-example">
+            <div class="iqr-example-header">예시</div>
+            <div class="iqr-example-body">
+              <div class="ex-row outlier"><span class="ex-price">3억</span><span class="ex-flag">✗ 제거 (급매·비정상)</span></div>
+              <div class="ex-row normal"><span class="ex-price">7억 5천</span><span class="ex-flag">✓ 정상</span></div>
+              <div class="ex-row normal"><span class="ex-price">7억 8천</span><span class="ex-flag">✓ 정상</span></div>
+              <div class="ex-row normal"><span class="ex-price">8억 1천</span><span class="ex-flag">✓ 정상</span></div>
+              <div class="ex-row normal"><span class="ex-price">8억 3천</span><span class="ex-flag">✓ 정상</span></div>
+              <div class="ex-row outlier"><span class="ex-price">14억</span><span class="ex-flag">✗ 제거 (특수관계거래)</span></div>
+              <div class="iqr-result">
+                정상 거래 4건 기준 평균 산출<br>
+                → 적정시세 약 <strong>7억 9,250만원</strong><br>
+                <span style="opacity:.7;font-size:clamp(7px,.9vw,9px);">(비정상 포함 시 약 8억 1천 → 약 2천만원 차이)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SLIDE 8 ══ -->
+  <div class="slide" id="s8">
+    <div class="slide-inner">
+      <div class="top-bar"><h2>기준값을 데이터가 결정한다</h2></div>
+      <div class="content-area" style="display:flex;flex-direction:column;">
+        <div class="desc-text">"신뢰도 3개월 이내 = 0.8" 같은 숫자를 사람이 임의로 정하지 않고, 과거 데이터 오차를 역산해서 통계적으로 도출합니다.</div>
+        <div class="stat-flow" style="flex:1;align-content:center;">
+          <div class="stat-step">
+            <div class="stat-num">1</div>
+            <h4>과거 데이터 준비</h4>
+            <p>12개월 이상 KB시세<br>실거래가, 매매호가<br>이력 수집</p>
+          </div>
+          <div class="stat-step">
+            <div class="stat-num">2</div>
+            <h4>적정시세 역산출</h4>
+            <p>T시점 데이터로 산출한 시세가 T+3개월 실거래가와 얼마나 차이났는지 측정</p>
+          </div>
+          <div class="stat-step">
+            <div class="stat-num">3</div>
+            <h4>파라미터 탐색</h4>
+            <p>오차를 가장 줄이는 신뢰도 감쇠값, 매물 기준 수를 자동으로 탐색</p>
+          </div>
+          <div class="stat-step">
+            <div class="stat-num">4</div>
+            <h4>기준값 확정</h4>
+            <p>통계적으로 최적인 값이 파라미터로 자동 채택 (정기 재산출 가능)</p>
+          </div>
+        </div>
+        <div class="stat-highlight">
+          이 방식의 핵심 장점 : 사람이 임의로 정한 숫자가 아닌, 실제 오차를 최소화한 숫자가 사용됩니다.<br>
+          → &nbsp;나중에 <strong>"왜 이 가중치인가?"</strong> 질문에 &nbsp;<strong>"데이터가 그렇게 말했다"</strong>고 답할 수 있습니다.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SLIDE 9 ══ -->
+  <div class="slide" id="s9">
+    <div class="slide-inner">
+      <div class="top-bar"><h2>단지 + 평수별 적용 : 분석의 최소 단위</h2></div>
+      <div class="decision-corner">✋ 현업 판단 필요</div>
+      <div class="content-area" style="display:flex;flex-direction:column;">
+        <div class="unit-note">
+          같은 단지여도 59㎡(20억대) / 84㎡(28억대) / 114㎡(38억대)는 완전히 다른 시장입니다.<br>
+          → &nbsp;적정시세와 가중치 파라미터는 반드시 <strong>단지 + 평형 조합 단위</strong>로 산출되어야 합니다.
+        </div>
+        <div style="font-size:clamp(10px,1.35vw,13px);font-weight:700;color:var(--navy);margin-bottom:8px;">데이터 부족 시 계층적 보완 체계</div>
+        <div class="hierarchy" style="flex:1;">
+          <div class="h-row">
+            <div class="h-accent" style="background:var(--green);"></div>
+            <div class="h-badge" style="background:var(--green);">최우선</div>
+            <div class="h-label">단지 + 평형 자체 데이터</div>
+            <div class="h-cond">조건 : 거래 10건 이상</div>
+          </div>
+          <div class="h-row">
+            <div class="h-accent" style="background:var(--orange);"></div>
+            <div class="h-badge" style="background:var(--orange);">보완</div>
+            <div class="h-label">같은 동(洞) + 유사 평형 묶음</div>
+            <div class="h-cond">조건 : 거래 5~9건</div>
+          </div>
+          <div class="h-row">
+            <div class="h-accent" style="background:#EA580C;"></div>
+            <div class="h-badge" style="background:#EA580C;">광역 보완</div>
+            <div class="h-label">시군구 + 평형대 (소형 / 중형 / 대형)</div>
+            <div class="h-cond">조건 : 거래 4건 이하</div>
+          </div>
+          <div class="h-row">
+            <div class="h-accent" style="background:var(--red);"></div>
+            <div class="h-badge" style="background:var(--red);">최후 수단</div>
+            <div class="h-label">전체 기본값 (Fallback)</div>
+            <div class="h-cond">조건 : 데이터 전무</div>
+          </div>
+        </div>
+        <div class="unit-tip">→ &nbsp;어떤 단지, 어떤 평형이든 항상 최적의 기준으로 산출 가능합니다.</div>
+        <div class="decision-box" style="margin-top:8px;">
+          <div class="db-title">✋ 현업 판단 필요 <span class="db-badge">슬라이드 9</span></div>
+          <ul>
+            <li><strong>거래 건수 기준값 확인</strong> — "10건 이상 → 자체 데이터 사용"이 심사 기준상 적절한지</li>
+            <li><strong>현재 DB에 쌓인 데이터 현황 파악 필요</strong> — 단지+평형 조합 중 10건 이상인 케이스가 몇 %인지 확인해야 전체 설계 현실성 판단 가능</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SLIDE 10 ══ -->
+  <div class="slide" id="s10">
+    <div class="slide-inner">
+      <div class="top-bar"><h2>전체 흐름 요약 및 구현 로드맵</h2></div>
+      <div class="content-area" style="display:flex;flex-direction:column;">
+        <div class="flow-strip">
+          <div class="flow-node" style="background:var(--blue);"><h4>데이터 수집</h4><p>KB · 실거래 · 호가</p></div>
+          <div class="flow-node" style="background:var(--purple);"><h4>이상치 제거</h4><p>IQR 방식</p></div>
+          <div class="flow-node" style="background:var(--orange);"><h4>신뢰도 산출</h4><p>시간 · 매물수</p></div>
+          <div class="flow-node" style="background:var(--green);"><h4>동적 가중치</h4><p>자동 조정</p></div>
+          <div class="flow-node" style="background:var(--navy);"><h4>JB 적정시세</h4><p>단지 + 평형별</p></div>
+        </div>
+        <div class="roadmap-grid" style="flex:1;">
+          <div class="rm-card">
+            <div class="rm-header" style="background:var(--green);">
+              <span class="rm-phase">1단계</span><span class="rm-dur">1~2주</span>
+            </div>
+            <div class="rm-body">
+              <h4>데이터 정제 + 동적 가중치</h4>
+              <div class="rm-item"><span class="dot-bullet" style="color:var(--green);">·</span>IQR 이상치 제거 로직</div>
+              <div class="rm-item"><span class="dot-bullet" style="color:var(--green);">·</span>실거래 시간 감쇠 적용</div>
+              <div class="rm-item"><span class="dot-bullet" style="color:var(--green);">·</span>매물 수 기반 호가 신뢰도</div>
+              <div class="rm-item" style="border:none;"><span class="dot-bullet" style="color:var(--green);">·</span>현재 코드에 바로 적용 가능</div>
+            </div>
+          </div>
+          <div class="rm-card">
+            <div class="rm-header" style="background:var(--orange);">
+              <span class="rm-phase">2단계</span><span class="rm-dur">1~2개월</span>
+            </div>
+            <div class="rm-body">
+              <h4>통계 기반 파라미터 자동 산출</h4>
+              <div class="rm-item"><span class="dot-bullet" style="color:var(--orange);">·</span>과거 데이터 오차 분석</div>
+              <div class="rm-item"><span class="dot-bullet" style="color:var(--orange);">·</span>최적 파라미터 자동 탐색</div>
+              <div class="rm-item"><span class="dot-bullet" style="color:var(--orange);">·</span>단지+평형 계층 구조 적용</div>
+              <div class="rm-item" style="border:none;"><span class="dot-bullet" style="color:var(--orange);">·</span>"데이터가 기준을 정함"</div>
+            </div>
+          </div>
+          <div class="rm-card">
+            <div class="rm-header" style="background:var(--blue);">
+              <span class="rm-phase">3단계</span><span class="rm-dur">3개월+</span>
+            </div>
+            <div class="rm-body">
+              <h4>시계열 예측 고도화</h4>
+              <div class="rm-item"><span class="dot-bullet" style="color:var(--blue);">·</span>Prophet / AutoARIMA 도입</div>
+              <div class="rm-item"><span class="dot-bullet" style="color:var(--blue);">·</span>신뢰구간 포함 예측</div>
+              <div class="rm-item"><span class="dot-bullet" style="color:var(--blue);">·</span>금리 등 외부변수 반영</div>
+              <div class="rm-item" style="border:none;"><span class="dot-bullet" style="color:var(--blue);">·</span>대출기간 리스크 예측</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SLIDE 11 ══ -->
+  <div class="slide" id="s11">
+    <div class="slide-inner">
+      <div class="accent-bar"></div>
+      <div class="circle1"></div>
+      <div class="close-label">핵심 요약</div>
+      <div class="close-items">
+        <div class="close-row"><div class="close-num">1</div><div class="close-text">고정 가중치 → 데이터 신뢰도 기반 <strong style="color:var(--orange);">동적 가중치</strong>로 전환</div></div>
+        <div class="close-row"><div class="close-num">2</div><div class="close-text">이상치(비정상 거래)는 <strong style="color:var(--orange);">IQR 방식</strong>으로 통계적 자동 제거</div></div>
+        <div class="close-row"><div class="close-num">3</div><div class="close-text">기준값은 사람이 정하지 않고 <strong style="color:var(--orange);">과거 오차를 역산</strong>해 도출</div></div>
+        <div class="close-row"><div class="close-num">4</div><div class="close-text"><strong style="color:var(--orange);">단지 + 평형 조합</strong>이 분석의 최소 단위 (계층적 보완 체계)</div></div>
+        <div class="close-row"><div class="close-num">5</div><div class="close-text">1단계부터 <strong style="color:var(--orange);">현재 코드에 즉시 적용 가능</strong></div></div>
+      </div>
+      <div class="s11-footer"><span>JB우리캐피탈  |  담보금융심사팀  |  내부 기획자료</span></div>
+    </div>
+  </div>
+
+</div><!-- /deck -->
+
+<!-- CONTROLS -->
+<div class="nav">
+  <button class="nav-btn" id="prevBtn" onclick="navigate(-1)" disabled>&#8592;</button>
+  <div class="dot-nav" id="dotNav"></div>
+  <span class="slide-counter" id="counter">1 / 11</span>
+  <button class="nav-btn" id="nextBtn" onclick="navigate(1)">&#8594;</button>
+  <span class="kbd-hint">← → 키보드</span>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+  let animating = false;
+
+  // build dots
+  const dotNav = document.getElementById('dotNav');
+  const decisionSlides1 = new Set([4, 5, 8]); // 슬라이드 5,6,9 (0-indexed)
+  for (let i = 0; i < total; i++) {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '') + (decisionSlides1.has(i) ? ' dot-decision' : '');
+    d.title = decisionSlides1.has(i) ? '현업 판단 필요' : '';
+    d.onclick = () => goTo(i);
+    dotNav.appendChild(d);
+  }
+
+  function updateUI() {
+    document.getElementById('counter').textContent = `${current + 1} / ${total}`;
+    document.getElementById('prevBtn').disabled = current === 0;
+    document.getElementById('nextBtn').disabled = current === total - 1;
+    document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === current));
+    document.getElementById('progressFill').style.width = `${((current + 1) / total) * 100}%`;
+  }
+
+  function goTo(idx) {
+    if (idx === current || animating || idx < 0 || idx >= total) return;
+    animating = true;
+    const dir = idx > current ? 1 : -1;
+    const prevIdx = current;
+
+    // 이전 슬라이드 퇴장
+    slides[prevIdx].classList.remove('active');
+    slides[prevIdx].classList.add('exit-left');
+
+    // 새 슬라이드: transition 끄고 초기 위치 세팅
+    current = idx;
+    slides[current].style.transition = 'none';
+    slides[current].style.transform = `translateX(${dir > 0 ? 60 : -60}px) scale(.97)`;
+    slides[current].style.opacity = '0';
+
+    // 강제 리플로우 — 브라우저가 초기 위치를 확실히 적용하게 함
+    slides[current].getBoundingClientRect();
+
+    // transition 복원 후 진입 애니메이션
+    slides[current].style.transition = '';
+    slides[current].style.transform = '';
+    slides[current].style.opacity = '';
+    slides[current].classList.add('active');
+    updateUI();
+
+    setTimeout(() => {
+      slides.forEach(s => {
+        s.classList.remove('exit-left');
+        s.style.transition = '';
+        s.style.transform = '';
+        s.style.opacity = '';
+      });
+      animating = false;
+    }, 480);
+  }
+
+  function navigate(dir) { goTo(current + dir); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') navigate(1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   navigate(-1);
+  });
+
+  // touch swipe
+  let touchX = 0;
+  document.getElementById('deck').addEventListener('touchstart', e => { touchX = e.touches[0].clientX; });
+  document.getElementById('deck').addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchX;
+    if (Math.abs(dx) > 50) navigate(dx < 0 ? 1 : -1);
+  });
+
+  updateUI();
+</script>
+</body>
+</html>

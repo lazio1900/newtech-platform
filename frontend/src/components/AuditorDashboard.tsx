@@ -13,6 +13,7 @@ import RegistryModal from './RegistryModal';
 import MonitoringTab from './MonitoringTab';
 import NearbyPropertyMap from './NearbyPropertyMap';
 import NearbyPropertyList from './NearbyPropertyList';
+import AINearbyAnalysis from './AINearbyAnalysis';
 import PricePerPyeongChart from './PricePerPyeongChart';
 import LtvCalculation from './LtvCalculation';
 import AiComprehensiveOpinion from './AiComprehensiveOpinion';
@@ -113,6 +114,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
           areaId: app.area_id ?? null,
           complexName: app.complex_name ?? null,
           pyeong: app.pyeong ?? null,
+          applicationId: app.id,
         },
       );
       setAppAnalysisData(response);
@@ -168,7 +170,8 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
     setShowModal: (v: boolean) => void,
     loanAmount: number,
     interestRate: number = 7.5,
-    loanDuration: number = 12
+    loanDuration: number = 12,
+    registryIcId: number | null = null,
   ) => (
     <div className="content-layout">
       <h2 className="section-divider">담보 물건 분석</h2>
@@ -192,16 +195,24 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
       </div>
 
       <h2 className="section-divider">유사 물건 분석</h2>
-      <div className="layout-row">
-        <NearbyPropertyMap
-          data={data.nearby_property_trends}
-          targetAddress={data.property_basic_info.address}
-        />
-        <NearbyPropertyList
-          data={data.nearby_property_trends}
-        />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <NearbyPropertyMap
+            data={data.nearby_property_trends}
+            targetAddress={data.property_basic_info.address}
+          />
+          <NearbyPropertyList
+            data={data.nearby_property_trends}
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <AINearbyAnalysis
+            nearbyAnalysis={data.ai_analysis.nearby_analysis}
+            similarCount={data.nearby_property_trends?.similar_properties.length || 0}
+          />
+        </div>
       </div>
-      <div className="layout-row-full">
+      <div className="layout-row-full" style={{ marginTop: 16 }}>
         <PricePerPyeongChart
           data={data.price_per_pyeong_trend}
         />
@@ -305,6 +316,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
       {showModal && (
         <RegistryModal
           onClose={() => setShowModal(false)}
+          icId={registryIcId}
         />
       )}
 
@@ -313,12 +325,15 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
         const kb = data.credit_data.kb_price;
         const molit = data.credit_data.molit_transactions;
         const naver = data.credit_data.naver_listings;
+        const jbFair = data.credit_data.jb_fair_price ?? kb.low;
         const ls = data.ai_analysis.location_scores;
         const totalPrior = (ri.max_bond_amount || 0) + (ri.tenant_deposit || 0) + loanAmount;
         const ltvCurrent = kb.estimated > 0 ? (totalPrior / kb.estimated * 100).toFixed(1) : '-';
-        const ltvJB = kb.low > 0 ? (totalPrior / kb.low * 100).toFixed(1) : '-';
+        const ltvJB = jbFair > 0 ? (totalPrior / jbFair * 100).toFixed(1) : '-';
         const nearbyProps = data.nearby_property_trends?.similar_properties || [];
         const pyeongData = data.price_per_pyeong_trend?.data || [];
+        // 심사 상태: 신청건 분석이면 selectedApp.status, 직접분석이면 "검토 필요"
+        const reviewStatus = selectedApp?.status || '검토 필요';
 
         return (
         <div className="modal-overlay" onClick={() => setShowReviewReport(false)}>
@@ -371,7 +386,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   </table>
                 </div>
 
-                {/* 2. 차주 재무 정보 */}
+                {/* 2. 차주(대부업체) 재무 정보 — 외부 신용평가 미연동, 더미 유지 */}
                 <div className="report-section">
                   <h4>2. 차주 재무 정보 (최근 3개년)</h4>
                   <table className="report-table">
@@ -400,22 +415,20 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   </table>
                 </div>
 
-                {/* 3. 연대보증인 정보 */}
+                {/* 3. 연대보증인 — 등기부 소유자 정보 활용 */}
                 <div className="report-section">
-                  <h4>3. 연대보증인(대표자) 정보</h4>
+                  <h4>3. 연대보증인(담보제공자) 정보</h4>
                   <table className="report-table">
                     <tbody>
                       <tr>
                         <th>성명</th>
-                        <td>{data.guarantor_info.name}</td>
-                        <th>신용점수</th>
-                        <td>{data.guarantor_info.credit_score_kcb}점</td>
+                        <td>{ri.ownership_entries?.[0]?.name || '-'}</td>
+                        <th>최종지분</th>
+                        <td>{ri.ownership_entries?.[0]?.share || '-'}</td>
                       </tr>
                       <tr>
-                        <th>직접채무</th>
-                        <td>{formatAmount(data.guarantor_info.direct_debt)}</td>
-                        <th>보증채무</th>
-                        <td>{formatAmount(data.guarantor_info.guarantee_debt)}</td>
+                        <th>주소</th>
+                        <td colSpan={3}>{ri.ownership_entries?.[0]?.address || '-'}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -514,7 +527,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                         <th>현재 시세 기준 LTV</th>
                         <td>{ltvCurrent}% (KB 추정가 {formatAmount(kb.estimated)})</td>
                         <th>JB 적정시세 기준 LTV</th>
-                        <td>{ltvJB}% (KB 하한가 {formatAmount(kb.low)})</td>
+                        <td>{ltvJB}% (JB 적정 {formatAmount(jbFair)})</td>
                       </tr>
                     </tbody>
                   </table>
@@ -527,10 +540,10 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   <table className="report-table score-table">
                     <thead>
                       <tr>
-                        <th>인접역 거리</th>
-                        <th>업무지구 이동시간</th>
-                        <th>세대수/연식</th>
-                        <th>초등학교 거리</th>
+                        <th>역세권</th>
+                        <th>노선 다양성</th>
+                        <th>단지 규모</th>
+                        <th>학군</th>
                         <th>생활환경</th>
                         <th>자연환경</th>
                       </tr>
@@ -628,7 +641,23 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                 {/* 12. 심사 결과 */}
                 <div className="report-section">
                   <h4>12. 심사 결과</h4>
-                  <div className="report-result approved">승인</div>
+                  <div
+                    className={`report-result ${reviewStatus === '승인' ? 'approved' : ''}`}
+                    style={{
+                      background:
+                        reviewStatus === '승인' ? '#e6f9f0' :
+                        reviewStatus === '반려' ? '#FEE2E2' :
+                        reviewStatus === '심사중' ? '#FEF3C7' :
+                        '#F1F5F9',
+                      color:
+                        reviewStatus === '승인' ? '#20c997' :
+                        reviewStatus === '반려' ? '#991B1B' :
+                        reviewStatus === '심사중' ? '#92400E' :
+                        '#475569',
+                    }}
+                  >
+                    {reviewStatus}
+                  </div>
                 </div>
 
                 <div className="report-footer">
@@ -641,10 +670,27 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
               <button className="btn-primary" onClick={() => {
                 const reportEl = document.querySelector('.review-report-document');
                 if (!reportEl) return;
+                // Word 호환 HTML (.doc) — Word/한컴 등에서 그대로 열림.
+                // 진짜 OOXML(.docx) 는 별도 라이브러리(docx) 필요.
                 const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>심사의견서</title>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<title>심사의견서</title>
+<!--[if gte mso 9]>
+<xml>
+  <w:WordDocument>
+    <w:View>Print</w:View>
+    <w:Zoom>100</w:Zoom>
+    <w:DoNotOptimizeForBrowser/>
+  </w:WordDocument>
+</xml>
+<![endif]-->
 <style>
-body{font-family:'Malgun Gothic',sans-serif;padding:40px;color:#333;max-width:900px;margin:0 auto}
+@page{size:A4;margin:2cm}
+body{font-family:'Malgun Gothic','맑은 고딕',sans-serif;padding:0;color:#333}
 h3{text-align:center;margin-bottom:4px}
 .report-date{text-align:center;color:#666;font-size:13px;margin-bottom:24px}
 table{width:100%;border-collapse:collapse;margin-bottom:16px}
@@ -657,14 +703,16 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
 .report-footer{margin-top:30px;text-align:right;font-size:12px;color:#666;border-top:1px solid #ccc;padding-top:12px}
 .warning{color:#EF5350}
 </style></head><body>${reportEl.innerHTML}</body></html>`;
-                const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+                const blob = new Blob(['﻿', html], {
+                  type: 'application/msword;charset=utf-8',
+                });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `심사의견서_${data.borrower_info.company_name}_${new Date().toISOString().slice(0,10)}.html`;
+                a.download = `심사의견서_${data.borrower_info.company_name}_${new Date().toISOString().slice(0,10)}.doc`;
                 a.click();
                 URL.revokeObjectURL(url);
-              }}>다운로드</button>
+              }}>Word 다운로드</button>
               <button className="btn-primary" style={{ backgroundColor: '#666' }} onClick={() => setShowReviewReport(false)}>닫기</button>
             </div>
           </div>
@@ -992,7 +1040,9 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                 )}
 
                 {appAnalysisData && !appLoading && renderAnalysisResult(
-                  appAnalysisData, showAppRegistryModal, setShowAppRegistryModal, selectedApp.loan_amount, 7.5, selectedApp.loan_duration
+                  appAnalysisData, showAppRegistryModal, setShowAppRegistryModal,
+                  selectedApp.loan_amount, 7.5, selectedApp.loan_duration,
+                  selectedApp.registry_ic_id ?? null,
                 )}
               </div>
             )}

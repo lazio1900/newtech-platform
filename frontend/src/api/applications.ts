@@ -24,6 +24,7 @@ export interface SubmitApplicationPayload {
   pyeong?: number | null;
   dong?: string | null;
   ho?: string | null;
+  registry_ic_id?: number | null;
 }
 
 export const submitApplication = async (

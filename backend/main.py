@@ -17,6 +17,7 @@ from routers import (
     health,
     monitoring,
     regions,
+    registry,
     suggestions,
 )
 
@@ -48,6 +49,7 @@ app.include_router(monitoring.router,    prefix="/api/monitoring",    tags=["mon
 app.include_router(analyze.router,       prefix="/api/analyze",       tags=["analyze"])
 app.include_router(complexes.router,     prefix="/api/complexes",     tags=["complexes"])
 app.include_router(regions.router,       prefix="/api/regions",       tags=["regions"])
+app.include_router(registry.router,      prefix="/api/registry",      tags=["registry"])
 
 
 @app.on_event("startup")

@@ -13,6 +13,7 @@ class AnalysisRequest(BaseModel):
     area_id: Optional[int] = Field(None, description="평형 ID (정확 매칭용)")
     complex_name: Optional[str] = Field(None, description="단지명 스냅샷")
     pyeong: Optional[int] = Field(None, description="평수 (정확 매칭용)")
+    application_id: Optional[str] = Field(None, description="신청건 ID (LLM 캐시 키)")
 
     class Config:
         json_schema_extra = {

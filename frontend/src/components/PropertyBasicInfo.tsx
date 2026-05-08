@@ -30,8 +30,20 @@ export default function PropertyBasicInfo({ data }: PropertyBasicInfoProps) {
           <span className="value">{data.age != null ? `약 ${data.age}년` : "N/A"}</span>
         </div>
         <div className="info-row">
+          <span className="label">공급면적:</span>
+          <span className="value">
+            {data.supply_m2 != null
+              ? `${data.supply_m2.toFixed(2)}㎡ (${Math.round(data.supply_m2 / 3.305785)}평)`
+              : "N/A"}
+          </span>
+        </div>
+        <div className="info-row">
           <span className="label">전용면적:</span>
-          <span className="value">{data.area != null ? `${data.area}평` : "N/A"}</span>
+          <span className="value">
+            {data.exclusive_m2 != null
+              ? `${data.exclusive_m2.toFixed(2)}㎡ (${Math.round(data.exclusive_m2 / 3.305785)}평)`
+              : data.area != null ? `${data.area}평` : "N/A"}
+          </span>
         </div>
         <div className="info-row">
           <span className="label">입지점수:</span>

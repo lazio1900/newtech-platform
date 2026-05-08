@@ -26,6 +26,10 @@ class Complex(Base):
     dong_code = Column(String(10), nullable=True, index=True, comment="법정동코드 (10자리)")
     dong_name = Column(String(50), nullable=True, comment="법정동명")
 
+    # 좌표 (newtech_data 가 채움 — facility 매칭용)
+    lat = Column(Float, nullable=True, comment="위도 (WGS84)")
+    lng = Column(Float, nullable=True, comment="경도 (WGS84)")
+
     # KB 소스 식별자
     kb_complex_id = Column(String(50), unique=True, nullable=True, comment="KB 단지 ID")
     

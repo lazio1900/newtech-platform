@@ -8,7 +8,7 @@ DB에 저장된 KB 시세/실거래/매물 데이터를 조회하여
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional, List
 
 from sqlalchemy.orm import Session
@@ -30,7 +30,7 @@ from models.response_models import (
 
 logger = logging.getLogger(__name__)
 
-HISTORY_DAYS = 90  # 최근 3개월
+HISTORY_DAYS = 365  # 최근 12개월 (거래 빈도 낮은 단지 고려)
 
 
 # ──────────────────────────────────────────────
@@ -231,10 +231,97 @@ def build_real_credit_data(
             history=[],
         )
 
+    # JB 적정시세 1단계 — 동적 가중치 + IQR + 시간 감쇠
+    from services.jb_fair_price import (
+        JBComputeInput,
+        compute_jb_fair_price,
+    )
+    from models.response_models import JBFairPriceDetail
+
+    # 12M 실거래 (날짜+가격 페어)
+    txns_for_jb = (
+        db.query(Transaction)
+        .filter(
+            Transaction.complex_id == complex_obj.id,
+            Transaction.contract_date >= cutoff,
+            Transaction.is_cancelled == False,
+            Transaction.exclusive_m2.between(
+                area_obj.exclusive_m2 - 5.0,
+                area_obj.exclusive_m2 + 5.0,
+            ),
+        )
+        .all()
+    )
+    txn_pairs = [(t.contract_date, t.price) for t in txns_for_jb]
+
+    # active 매물 호가
+    active_prices = [
+        l.ask_price for l in db.query(Listing).filter(
+            Listing.complex_id == complex_obj.id,
+            Listing.status == ListingStatus.ACTIVE,
+        ).all() if l.ask_price
+    ]
+
+    jb_input = JBComputeInput(
+        kb_estimated=kb_data.estimated,
+        transactions=txn_pairs,
+        active_listing_prices=active_prices,
+        today=today,
+    )
+    jb_result = compute_jb_fair_price(jb_input)
+
+    # JB 추이 — KB history 의 각 시점마다 산출 (해당 시점 기준 12M 실거래 슬라이싱)
+    jb_history: list[PricePoint] = []
+    for kb_pt in kb_data.history:
+        try:
+            pt_date = date.fromisoformat(kb_pt.date)
+        except (ValueError, TypeError):
+            continue
+        pt_cutoff = pt_date - timedelta(days=365)
+        pt_txns = [(d, p) for d, p in txn_pairs if pt_cutoff <= d <= pt_date]
+        pt_input = JBComputeInput(
+            kb_estimated=kb_pt.price,
+            transactions=pt_txns,
+            active_listing_prices=active_prices,
+            today=pt_date,
+        )
+        pt_result = compute_jb_fair_price(pt_input)
+        jb_history.append(PricePoint(date=kb_pt.date, price=pt_result.jb_fair_price))
+
+    # 예측 — 단순 트렌드 + 90% 신뢰구간 (대출기간만큼)
+    from services.jb_fair_price import project_jb_forecast
+    from models.response_models import ForecastPoint as ForecastPointSchema
+
+    forecast_points = project_jb_forecast(
+        current_jb=jb_result.jb_fair_price,
+        transactions=txn_pairs,
+        today=today,
+        horizon_months=12,
+    )
+    forecast_schema = []
+    for fp in forecast_points:
+        d = today + timedelta(days=int(fp.month * 30.4375))
+        forecast_schema.append(ForecastPointSchema(
+            date=d.strftime("%Y-%m-%d"),
+            predicted=fp.predicted,
+            lower=fp.lower,
+            upper=fp.upper,
+        ))
+
     return CreditData(
         kb_price=kb_data,
         molit_transactions=molit_data,
         naver_listings=naver_data,
+        jb_fair_price=jb_result.jb_fair_price,
+        jb_detail=JBFairPriceDetail(
+            fair_price=jb_result.jb_fair_price,
+            weights=jb_result.weights,
+            sources=jb_result.sources,
+            confidence=jb_result.confidence,
+            notes=jb_result.notes,
+            history=jb_history,
+            forecast=forecast_schema,
+        ),
     )
 
 
@@ -346,7 +433,10 @@ def _build_naver_listings(
     complex_id: int,
     cutoff: date,
 ) -> Optional[NaverListings]:
-    """Listing 테이블에서 현재 매물 및 최근 90일 호가를 조회한다."""
+    """Listing 테이블에서 현재 매물 및 호가 추이를 조회한다.
+
+    history 는 매물의 등록일(posted_at) 기준 산점도. 매물별 1포인트.
+    """
     active_listings = (
         db.query(Listing)
         .filter(
@@ -360,9 +450,9 @@ def _build_naver_listings(
         db.query(Listing)
         .filter(
             Listing.complex_id == complex_id,
-            Listing.fetched_at >= cutoff,
+            # posted_at 우선 — 없으면 fetched_at 으로 fallback
+            (Listing.posted_at >= cutoff) | (Listing.fetched_at >= cutoff),
         )
-        .order_by(Listing.fetched_at.asc())
         .all()
     )
 
@@ -370,22 +460,28 @@ def _build_naver_listings(
         return None
 
     listing_count = len(active_listings)
-    avg_asking = 0
-    if active_listings:
-        avg_asking = int(
-            sum(l.ask_price for l in active_listings) / len(active_listings)
+    # 가장 최근 등록(posted_at) active 매물의 호가
+    latest_asking = 0
+    pool = active_listings or all_listings
+    if pool:
+        latest_listing = max(
+            pool,
+            key=lambda l: l.posted_at or l.fetched_at or datetime.min,
         )
+        latest_asking = latest_listing.ask_price or 0
+    avg_asking = latest_asking
 
-    # 일별 평균 호가 히스토리
-    daily_prices: dict[str, list[int]] = {}
+    # 호가 추이 — 매물별 (posted_at, ask_price) 1포인트씩 산점도용
+    points: list[tuple[date, int]] = []
     for l in all_listings:
-        if l.fetched_at:
-            day_key = l.fetched_at.strftime("%Y-%m-%d")
-            daily_prices.setdefault(day_key, []).append(l.ask_price)
+        anchor = l.posted_at or l.fetched_at
+        if anchor and l.ask_price:
+            points.append((anchor.date() if hasattr(anchor, "date") else anchor, l.ask_price))
+    points.sort(key=lambda x: x[0])
 
     history = [
-        PricePoint(date=d, price=int(sum(ps) / len(ps)))
-        for d, ps in sorted(daily_prices.items())
+        PricePoint(date=d.strftime("%Y-%m-%d"), price=p)
+        for d, p in points
     ]
 
     trend = _calculate_listing_trend(listing_count)
@@ -402,108 +498,219 @@ def _build_naver_listings(
 # 4. 인근 유사 물건지 동향
 # ──────────────────────────────────────────────
 
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> int:
+    """두 좌표 간 직선 거리 (m)."""
+    import math
+    R = 6371000.0
+    p1 = math.radians(lat1)
+    p2 = math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return int(R * c)
+
+
 def build_real_nearby_trends(
     db: Session,
     target_complex: Complex,
     target_area: Optional[Area],
     max_count: int = 5,
 ) -> Optional[NearbyPropertyTrends]:
-    """
-    같은 시군구(region_code 앞 5자리)의 다른 단지들에서
-    최근 거래 정보를 가져와 유사 물건지 동향을 구성한다.
+    """반경 + 평형 매칭 + 유사도 점수 기반 인근 유사 물건 산출.
+
+    1) 타겟 lat/lng 기준 1km 반경, 부족하면 2km
+    2) 평형 ±5㎡ 우선, 부족하면 ±10㎡
+    3) 유사도 = 거리(40%) + 평형차(30%) + 연식차(20%) + 세대수차(10%)
+    4) 점수 상위 max_count 건
+    5) 가격차 % = (유사 - 타겟) / 타겟
     """
     if not target_complex.region_code:
         return None
-
-    cutoff = date.today() - timedelta(days=HISTORY_DAYS)
-    region_prefix = target_complex.region_code[:5]
-
-    nearby = (
-        db.query(Complex)
-        .filter(
-            Complex.region_code.like(f"{region_prefix}%"),
-            Complex.id != target_complex.id,
-            Complex.is_active == True,
-        )
-        .limit(max_count * 3)
-        .all()
-    )
-
-    if not nearby:
+    target_lat = target_complex.lat
+    target_lng = target_complex.lng
+    if target_lat is None or target_lng is None:
         return None
 
-    similar_properties: List[SimilarProperty] = []
-    for c in nearby:
-        if len(similar_properties) >= max_count:
+    target_m2 = target_area.exclusive_m2 if target_area else None
+    target_age = None
+    if target_complex.built_year:
+        try:
+            target_age = date.today().year - int(str(target_complex.built_year)[:4])
+        except (ValueError, TypeError):
+            pass
+    target_units = target_complex.total_households or 0
+
+    today = date.today()
+    cutoff_3m = today - timedelta(days=90)
+
+    # 타겟 최근 거래가 (비교 기준)
+    target_recent = (
+        db.query(Transaction)
+        .filter(
+            Transaction.complex_id == target_complex.id,
+            Transaction.is_cancelled == False,
+        )
+        .order_by(Transaction.contract_date.desc())
+        .first()
+    )
+    target_recent_price = target_recent.price if target_recent else None
+
+    # 단계적 반경/평형 확장 — (radius_m, m2_tolerance)
+    plans = [(1000, 5.0), (1000, 10.0), (2000, 10.0), (2000, 15.0)]
+    candidates: list[tuple[Complex, Area, int]] = []  # (complex, matched_area, distance_m)
+
+    for radius, m2_tol in plans:
+        candidates = []
+        # 시군구 후보 (lat/lng 있는 것만)
+        nearby = (
+            db.query(Complex)
+            .filter(
+                Complex.region_code.like(f"{target_complex.region_code[:5]}%"),
+                Complex.id != target_complex.id,
+                Complex.is_active == True,
+                Complex.lat.isnot(None),
+                Complex.lng.isnot(None),
+            )
+            .all()
+        )
+        for c in nearby:
+            d = _haversine_m(target_lat, target_lng, c.lat, c.lng)
+            if d > radius:
+                continue
+            # 평형 매칭 area 찾기
+            matched_area = None
+            if target_m2 and c.areas:
+                for a in c.areas:
+                    if a.exclusive_m2 and abs(a.exclusive_m2 - target_m2) <= m2_tol:
+                        if matched_area is None or abs(a.exclusive_m2 - target_m2) < abs((matched_area.exclusive_m2 or 0) - target_m2):
+                            matched_area = a
+            elif c.areas:
+                matched_area = c.areas[0]
+            if matched_area is None:
+                continue
+            candidates.append((c, matched_area, d))
+        if len(candidates) >= max_count:
             break
 
+    if not candidates:
+        return None
+
+    # 유사도 점수 산출
+    def score(c: Complex, a: Area, d: int) -> float:
+        # 거리 (40%): 0m=1.0, 2km=0.0
+        s_d = max(0.0, 1.0 - d / 2000.0)
+        # 평형차 (30%): ±0=1.0, ±15m²=0.0
+        s_a = 1.0
+        if target_m2 and a.exclusive_m2:
+            s_a = max(0.0, 1.0 - abs(a.exclusive_m2 - target_m2) / 15.0)
+        # 연식차 (20%): ±0=1.0, ±20년=0.0
+        s_y = 1.0
+        if target_age is not None and c.built_year:
+            try:
+                c_age = today.year - int(str(c.built_year)[:4])
+                s_y = max(0.0, 1.0 - abs(c_age - target_age) / 20.0)
+            except (ValueError, TypeError):
+                pass
+        # 세대수차 (10%): 비율 가까울수록
+        s_u = 1.0
+        if target_units > 0 and c.total_households:
+            ratio = min(target_units, c.total_households) / max(target_units, c.total_households)
+            s_u = ratio
+        return round(s_d * 0.4 + s_a * 0.3 + s_y * 0.2 + s_u * 0.1, 3)
+
+    scored: list[tuple[Complex, Area, int, float]] = []
+    for c, a, d in candidates:
+        scored.append((c, a, d, score(c, a, d)))
+    scored.sort(key=lambda x: x[3], reverse=True)
+    scored = scored[:max_count]
+
+    similar_properties: List[SimilarProperty] = []
+    change_rates: list[float] = []
+    for c, a, d, sim in scored:
+        # 평형 매칭된 거래만으로 최근가 + 3개월 변동
+        m2_lo = (a.exclusive_m2 or 0) - 5.0
+        m2_hi = (a.exclusive_m2 or 0) + 5.0
         recent_txn = (
             db.query(Transaction)
             .filter(
                 Transaction.complex_id == c.id,
                 Transaction.is_cancelled == False,
+                Transaction.exclusive_m2.between(m2_lo, m2_hi),
             )
             .order_by(Transaction.contract_date.desc())
             .first()
         )
-
+        if not recent_txn:
+            # 평형 매칭 거래 없으면 전체 fallback
+            recent_txn = (
+                db.query(Transaction)
+                .filter(Transaction.complex_id == c.id, Transaction.is_cancelled == False)
+                .order_by(Transaction.contract_date.desc())
+                .first()
+            )
         if not recent_txn:
             continue
-
         oldest_txn = (
             db.query(Transaction)
             .filter(
                 Transaction.complex_id == c.id,
-                Transaction.contract_date >= cutoff,
+                Transaction.contract_date >= cutoff_3m,
                 Transaction.is_cancelled == False,
+                Transaction.exclusive_m2.between(m2_lo, m2_hi),
             )
             .order_by(Transaction.contract_date.asc())
             .first()
         )
-
         price_change_rate = 0.0
-        if oldest_txn and oldest_txn.price > 0:
-            price_change_rate = round(
-                (recent_txn.price - oldest_txn.price) / oldest_txn.price, 3
-            )
+        if oldest_txn and oldest_txn.price > 0 and oldest_txn.id != recent_txn.id:
+            price_change_rate = round((recent_txn.price - oldest_txn.price) / oldest_txn.price, 3)
+        change_rates.append(price_change_rate)
 
-        c_area = c.areas[0] if c.areas else None
-        area_pyeong = int(c_area.pyeong) if c_area and c_area.pyeong else 0
+        price_diff_pct = None
+        if target_recent_price and target_recent_price > 0:
+            price_diff_pct = round((recent_txn.price - target_recent_price) / target_recent_price * 100, 1)
 
         parts = (c.address or "").split()
         sido = parts[0] if len(parts) > 0 else ""
         sigungu = parts[1] if len(parts) > 1 else ""
-
-        sim_units = c.total_households or 0
-        sim_age = 0
+        c_age = 0
         if c.built_year:
             try:
-                sim_age = date.today().year - int(str(c.built_year)[:4])
+                c_age = today.year - int(str(c.built_year)[:4])
             except (ValueError, TypeError):
-                sim_age = 0
+                pass
 
-        similar_properties.append(
-            SimilarProperty(
-                name=c.name,
-                sido=sido,
-                sigungu=sigungu,
-                address=c.address or "",
-                units=sim_units,
-                age=sim_age,
-                area=area_pyeong,
-                lat=0.0,
-                lng=0.0,
-                recent_price=recent_txn.price,
-                price_change_rate=price_change_rate,
-            )
-        )
+        similar_properties.append(SimilarProperty(
+            name=c.name,
+            sido=sido,
+            sigungu=sigungu,
+            address=c.address or "",
+            units=c.total_households or 0,
+            age=c_age,
+            area=int(a.pyeong) if a.pyeong else (int((a.exclusive_m2 or 0) / 3.305785) if a.exclusive_m2 else 0),
+            exclusive_m2=a.exclusive_m2,
+            lat=c.lat,
+            lng=c.lng,
+            distance_m=d,
+            similarity=sim,
+            recent_price=recent_txn.price,
+            price_change_rate=price_change_rate,
+            price_diff_pct=price_diff_pct,
+        ))
 
     if not similar_properties:
         return None
 
+    avg_change = round(sum(change_rates) / len(change_rates), 3) if change_rates else 0.0
+    radius_used = next((p[0] for p in plans if any(d <= p[0] for _, _, d in candidates)), 2000)
+
     return NearbyPropertyTrends(
-        target_lat=0.0,
-        target_lng=0.0,
+        target_lat=target_lat,
+        target_lng=target_lng,
+        target_recent_price=target_recent_price,
+        radius_m=radius_used,
+        avg_change_rate=avg_change,
         similar_properties=similar_properties,
     )
 
@@ -517,67 +724,104 @@ def build_real_price_per_pyeong(
     target_complex: Complex,
     target_area: Area,
 ) -> Optional[PricePerPyeongTrend]:
+    """단지/읍면동/시군구 평단가 추이 — 실거래가 기반 12개월 월별.
+
+    ─ 단지: target_complex 거래 중 ±5m² 평균
+    ─ 읍면동: 같은 dong_code(10자리) 단지들의 ±5m² 거래 평균
+    ─ 시군구: 같은 region_code(5자리) 단지들의 ±5m² 거래 평균
+
+    각 월 평균 거래가를 평형(평)으로 나눈 만원 단위.
+    데이터 결측 월은 직전 값 carry-forward.
     """
-    KB 시세와 면적 정보를 이용해 단지/읍면동/시군구 평단가 추이를 계산한다.
-    """
-    pyeong = target_area.pyeong or (target_area.exclusive_m2 / 3.305785)
-    if pyeong <= 0:
+    pyeong = target_area.pyeong or (target_area.exclusive_m2 / 3.305785 if target_area.exclusive_m2 else 0)
+    if pyeong <= 0 or not target_area.exclusive_m2:
         return None
+    m2_lo = target_area.exclusive_m2 - 5.0
+    m2_hi = target_area.exclusive_m2 + 5.0
 
     today = date.today()
+    months_back = 12
+    # 월 키 list (오래된 → 최근)
+    month_keys: list[tuple[str, date, date]] = []
+    cursor = today.replace(day=1)
+    for _ in range(months_back):
+        end = (cursor + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        end = min(end, today)
+        month_keys.append((cursor.strftime("%Y-%m"), cursor, end))
+        cursor = (cursor - timedelta(days=1)).replace(day=1)
+    month_keys.reverse()
+
+    def _avg_ppp_for_scope(scope_filter, restrict_m2: bool) -> dict[str, int]:
+        """월별 평단가 dict {YYYY-MM: ppp(만원/평)}.
+        restrict_m2=True 면 ±5m² (단지용), False 면 모든 평형 (동/구 평균)."""
+        q = (
+            db.query(
+                func.to_char(Transaction.contract_date, 'YYYY-MM').label('ym'),
+                func.avg(Transaction.price / Transaction.exclusive_m2).label('avg_won_per_m2'),
+            )
+            .join(Complex, Transaction.complex_id == Complex.id)
+            .filter(scope_filter)
+            .filter(Transaction.is_cancelled == False)
+            .filter(Transaction.exclusive_m2 > 0)
+            .filter(Transaction.contract_date >= month_keys[0][1])
+        )
+        if restrict_m2:
+            q = q.filter(Transaction.exclusive_m2.between(m2_lo, m2_hi))
+        rows = q.group_by('ym').all()
+        return {
+            r.ym: int(float(r.avg_won_per_m2) * 3.305785 / 10000)
+            for r in rows if r.avg_won_per_m2
+        }
+
+    complex_dict = _avg_ppp_for_scope(Complex.id == target_complex.id, restrict_m2=True)
+    dong_dict = (
+        _avg_ppp_for_scope(Complex.dong_code == target_complex.dong_code, restrict_m2=False)
+        if target_complex.dong_code else {}
+    )
+    sigungu_dict = (
+        _avg_ppp_for_scope(Complex.region_code.like(f"{target_complex.region_code[:5]}%"), restrict_m2=False)
+        if target_complex.region_code else {}
+    )
+
+    # carry-forward 로 결측 채움
+    def _carry_forward(d: dict[str, int]) -> dict[str, int]:
+        out = {}
+        last = 0
+        for k, _, _ in month_keys:
+            if k in d:
+                last = d[k]
+                out[k] = last
+            elif last > 0:
+                out[k] = last
+            else:
+                out[k] = 0
+        return out
+
+    complex_filled = _carry_forward(complex_dict)
+    dong_filled = _carry_forward(dong_dict)
+    sigungu_filled = _carry_forward(sigungu_dict)
+
     data_points: List[PricePerPyeongPoint] = []
+    for ym, _, _ in month_keys:
+        c_ppp = complex_filled.get(ym, 0)
+        d_ppp = dong_filled.get(ym, 0)
+        s_ppp = sigungu_filled.get(ym, 0)
+        # 단지 데이터 없으면 동값 fallback, 동도 없으면 시군구
+        if c_ppp == 0:
+            c_ppp = d_ppp or s_ppp
+        if d_ppp == 0:
+            d_ppp = s_ppp or c_ppp
+        if s_ppp == 0:
+            s_ppp = d_ppp or c_ppp
+        data_points.append(PricePerPyeongPoint(
+            date=ym, complex=c_ppp, dong=d_ppp, sigungu=s_ppp,
+        ))
 
-    for months_ago in range(2, -1, -1):
-        month_start = (today.replace(day=1) - timedelta(days=months_ago * 30)).replace(day=1)
-        if months_ago > 0:
-            month_end = (month_start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-        else:
-            month_end = today
-
-        month_str = month_start.strftime("%Y-%m")
-
-        # 단지 평단가
-        complex_kb = (
-            db.query(KBPriceModel)
-            .filter(
-                KBPriceModel.complex_id == target_complex.id,
-                KBPriceModel.area_id == target_area.id,
-                KBPriceModel.as_of_date.between(month_start, month_end),
-                KBPriceModel.general_price.isnot(None),
-            )
-            .order_by(KBPriceModel.as_of_date.desc())
-            .first()
-        )
-
-        complex_ppp = 0
-        if complex_kb and complex_kb.general_price:
-            complex_ppp = int(complex_kb.general_price / pyeong / 10000)
-
-        # 읍면동 평균 평단가
-        dong_ppp = _calc_regional_ppp(
-            db, target_complex.region_code, month_start, month_end, level="dong"
-        )
-
-        # 시군구 평균 평단가
-        sigungu_ppp = _calc_regional_ppp(
-            db, target_complex.region_code, month_start, month_end, level="sigungu"
-        )
-
-        data_points.append(
-            PricePerPyeongPoint(
-                date=month_str,
-                complex=complex_ppp,
-                dong=dong_ppp or complex_ppp,
-                sigungu=sigungu_ppp or complex_ppp,
-            )
-        )
-
-    # 전체 데이터가 0이면 의미 없음
-    if all(p.complex == 0 for p in data_points):
+    if all(p.complex == 0 and p.dong == 0 and p.sigungu == 0 for p in data_points):
         return None
 
     address_parts = (target_complex.address or "").split()
-    dong_name = address_parts[2] if len(address_parts) > 2 else "동"
+    dong_name = target_complex.dong_name or (address_parts[2] if len(address_parts) > 2 else "동")
     sigungu_name = address_parts[1] if len(address_parts) > 1 else "구"
 
     return PricePerPyeongTrend(
@@ -586,53 +830,6 @@ def build_real_price_per_pyeong(
         sigungu_name=sigungu_name,
         data=data_points,
     )
-
-
-def _calc_regional_ppp(
-    db: Session,
-    region_code: Optional[str],
-    month_start: date,
-    month_end: date,
-    level: str = "dong",
-) -> int:
-    """지역 수준별(dong/sigungu) 평균 평단가를 계산한다."""
-    if not region_code:
-        return 0
-
-    prefix = region_code if level == "dong" else region_code[:5]
-
-    avg_price = (
-        db.query(func.avg(KBPriceModel.general_price))
-        .join(Complex, KBPriceModel.complex_id == Complex.id)
-        .join(Area, KBPriceModel.area_id == Area.id)
-        .filter(
-            Complex.region_code.like(f"{prefix}%"),
-            KBPriceModel.as_of_date.between(month_start, month_end),
-            KBPriceModel.general_price.isnot(None),
-            Area.pyeong.isnot(None),
-            Area.pyeong > 0,
-        )
-        .scalar()
-    )
-
-    avg_pyeong = (
-        db.query(func.avg(Area.pyeong))
-        .join(KBPriceModel, Area.id == KBPriceModel.area_id)
-        .join(Complex, KBPriceModel.complex_id == Complex.id)
-        .filter(
-            Complex.region_code.like(f"{prefix}%"),
-            KBPriceModel.as_of_date.between(month_start, month_end),
-            KBPriceModel.general_price.isnot(None),
-            Area.pyeong.isnot(None),
-            Area.pyeong > 0,
-        )
-        .scalar()
-    )
-
-    if avg_price and avg_pyeong and avg_pyeong > 0:
-        return int(float(avg_price) / float(avg_pyeong) / 10000)
-
-    return 0
 
 
 # ──────────────────────────────────────────────

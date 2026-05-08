@@ -24,18 +24,32 @@ class LLMClient:
         self.model = model or settings.openai_model
         self.max_tokens = settings.llm_max_tokens
 
-    def complete(self, prompt: str, *, system: Optional[str] = None) -> dict:
-        """단일 프롬프트 호출. 응답 텍스트와 사용량 메타를 dict로 반환."""
+    def complete(
+        self,
+        prompt: str,
+        *,
+        system: Optional[str] = None,
+        json_mode: bool = False,
+    ) -> dict:
+        """단일 프롬프트 호출. 응답 텍스트와 사용량 메타를 dict로 반환.
+
+        json_mode=True 일 때 response_format=json_object 로 호출 (system/user에
+        'JSON' 단어가 포함되어야 OpenAI가 활성화함).
+        """
         messages: list[dict] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        response = self._client.chat.completions.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            messages=messages,
-        )
+        kwargs = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": messages,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = self._client.chat.completions.create(**kwargs)
         choice = response.choices[0]
         usage = response.usage
         return {

@@ -3,6 +3,7 @@ import { User, LoanApplication } from '../types/loan';
 import { submitApplication, getApplications } from '../api/applications';
 import { complexesApi } from '../api/complexes';
 import { regionsApi, RegionItem, DongItem } from '../api/regions';
+import { registryApi } from '../api/registry';
 import type { Area, Complex } from '@/types/complex';
 import './CustomerDashboard.css';
 
@@ -47,6 +48,93 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
   // 동·호·금액
   const [dong, setDong] = useState<string>('');
   const [ho, setHo] = useState<string>('');
+
+  // 등기부등본 발급
+  const [registryLoading, setRegistryLoading] = useState<boolean>(false);
+  const [registryResult, setRegistryResult] = useState<{
+    status?: string; ic_id?: number | null; pdf_url?: string | null;
+    cached?: boolean; error?: string | null;
+  } | null>(null);
+
+  const handleFetchRegistry = async () => {
+    if (!selectedComplex || !dong.trim() || !ho.trim()) return;
+    setRegistryLoading(true);
+    setRegistryResult(null);
+    try {
+      // 단지명을 주소에 포함시켜 인터넷등기소 매칭률 ↑
+      // (HANDOFF.md 기준: '도로명 + 단지명 + 동/호' 조합 권장)
+      const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
+      const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
+
+      const res = await registryApi.request({
+        address: fullAddress,
+        dong: dong.trim(),
+        ho: ho.trim(),
+        type: '집합건물',
+      });
+
+      // 즉시 완료된 경우 (캐시 hit 등)
+      if (res.status === 'completed' && res.ic_id) {
+        setRegistryResult({
+          status: res.status, ic_id: res.ic_id,
+          pdf_url: registryApi.pdfUrl(res.ic_id),
+          cached: res.cached, error: res.error_message,
+        });
+        return;
+      }
+
+      // 폴링 (최대 60초, 5초 간격)
+      const icId = res.ic_id;
+      if (!icId) {
+        setRegistryResult({
+          status: res.status, error: res.error_message || '발급 ID 미발급',
+        });
+        return;
+      }
+      setRegistryResult({ status: 'issuing', ic_id: icId });
+
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      let elapsed = 0;
+      while (elapsed < 60_000) {
+        await sleep(5000);
+        elapsed += 5000;
+        try {
+          const cur = await registryApi.get(icId);
+          if (cur.status === 'completed') {
+            setRegistryResult({
+              status: 'completed', ic_id: icId,
+              pdf_url: registryApi.pdfUrl(icId),
+              cached: cur.cached, error: null,
+            });
+            return;
+          }
+          if (cur.status === 'failed') {
+            setRegistryResult({
+              status: 'failed', ic_id: icId, error: cur.error_message || '발급 실패',
+            });
+            return;
+          }
+          // 'issuing' / 'requested' 면 계속 폴링
+          setRegistryResult({ status: cur.status, ic_id: icId });
+        } catch (pollErr) {
+          // 일시 오류면 다음 폴링 시도
+        }
+      }
+      setRegistryResult({
+        status: 'timeout', ic_id: icId,
+        error: '발급이 1분 안에 완료되지 않았습니다. 잠시 후 다시 확인해주세요.',
+      });
+    } catch (e: any) {
+      setRegistryResult({
+        error: e?.response?.data?.detail?.message
+            || e?.response?.data?.detail
+            || e?.message
+            || '등기부등본 발급 요청에 실패했습니다',
+      });
+    } finally {
+      setRegistryLoading(false);
+    }
+  };
   const [amount, setAmount] = useState<string>('');
   const [duration, setDuration] = useState<string>('12');
 
@@ -260,6 +348,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
         pyeong: derivedPyeong,
         dong: dong.trim() || null,
         ho: ho.trim() || null,
+        registry_ic_id: registryResult?.ic_id ?? null,
       });
       if (data.status === 'success') {
         alert('대출 신청이 완료되었습니다.');
@@ -268,6 +357,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
         setSigunguList([]); setDongList([]);
         resetComplexAndDownstream();
         setAmount(''); setDuration('12');
+        setRegistryResult(null);
         setActiveTab('history');
       }
     } catch {
@@ -550,6 +640,57 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                              onChange={(e) => setHo(e.target.value)}
                              placeholder="예: 502호" disabled={submitting} />
                     </div>
+                  </div>
+
+                  {/* 등기부등본 가져오기 */}
+                  <div className="apply-field" style={{ marginTop: 12 }}>
+                    <button
+                      type="button"
+                      onClick={handleFetchRegistry}
+                      disabled={
+                        submitting || registryLoading ||
+                        !dong.trim() || !ho.trim()
+                      }
+                      style={{
+                        width: '100%', padding: '10px 16px',
+                        background: registryLoading ? '#7DCCE5' : '#006FBD',
+                        color: '#fff', border: 'none', borderRadius: 6,
+                        fontSize: 14, fontWeight: 600,
+                        cursor: registryLoading ? 'wait' : 'pointer',
+                        opacity: (!dong.trim() || !ho.trim()) ? 0.5 : 1,
+                      }}
+                    >
+                      {registryLoading ? '발급 요청 중...' : '📄 등기부등본 가져오기'}
+                    </button>
+                    {registryResult && (
+                      <div style={{
+                        marginTop: 8, padding: 10, borderRadius: 4,
+                        background: registryResult.error ? '#FEE2E2' : '#D1FAE5',
+                        fontSize: 12, color: registryResult.error ? '#991B1B' : '#065F46',
+                      }}>
+                        {registryResult.error || (
+                          <>
+                            <strong>발급 {registryResult.status}</strong>
+                            {registryResult.ic_id ? ` (ID: ${registryResult.ic_id})` : ''}
+                            {registryResult.pdf_url && registryResult.ic_id && (
+                              <>
+                                {' · '}
+                                <button type="button"
+                                  onClick={() => registryApi.openPdf(registryResult.ic_id!)}
+                                  style={{
+                                    background: 'transparent', border: 'none', padding: 0,
+                                    color: '#006FBD', textDecoration: 'underline', cursor: 'pointer',
+                                    fontSize: 12, fontWeight: 600,
+                                  }}>
+                                  PDF 다운로드
+                                </button>
+                              </>
+                            )}
+                            {registryResult.cached && ' · 캐시 (재발급 비용 0)'}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               )}

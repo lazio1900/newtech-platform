@@ -6,6 +6,8 @@ export interface PropertyBasicData {
   corridor_type: string | null;
   age: number | null;
   area: number | null;
+  exclusive_m2?: number | null;
+  supply_m2?: number | null;
   location_score: number | null;
 }
 
@@ -98,6 +100,7 @@ export interface CreditSourcesData {
   kb_price: KbPrice;
   molit_transactions: MolitTransactions;
   naver_listings: NaverListings;
+  jb_fair_price?: number | null;
 }
 
 // AI 권리 분석 - 항목별 요약
@@ -138,6 +141,7 @@ export interface LoanApplication {
   pyeong?: number | null;
   dong?: string | null;
   ho?: string | null;
+  registry_ic_id?: number | null;
   memo?: string | null;
   created_at: string;
   decided_at?: string | null;
@@ -164,11 +168,32 @@ export interface NaverListingsWithHistory extends NaverListings {
   history: PriceHistoryPoint[];
 }
 
+// JB 시세 미래 예측 (90% 신뢰구간)
+export interface ForecastPoint {
+  date: string;
+  predicted: number;
+  lower: number;
+  upper: number;
+}
+
+// JB 적정시세 동적 가중치 산출 상세
+export interface JBFairPriceDetail {
+  fair_price: number;
+  weights: Record<string, number>;
+  sources: Record<string, number>;
+  confidence: Record<string, number>;
+  notes: string[];
+  history: PriceHistoryPoint[];
+  forecast: ForecastPoint[];
+}
+
 // 크레딧 소스 데이터 (차트용 이력 포함)
 export interface CreditDataWithHistory {
   kb_price: KbPriceWithHistory;
   molit_transactions: MolitTransactionsWithHistory;
   naver_listings: NaverListingsWithHistory;
+  jb_fair_price?: number | null;
+  jb_detail?: JBFairPriceDetail | null;
 }
 
 // 입지 분석 점수
@@ -186,7 +211,9 @@ export interface AiAnalysis {
   property_analysis: string;
   rights_analysis: RightsAnalysisDetail;
   market_analysis: string;
+  nearby_analysis?: string | null;
   comprehensive_opinion: string;
+  auditor_recommendation?: string | null;
   location_scores?: LocationScores;
 }
 
@@ -199,16 +226,23 @@ export interface SimilarProperty {
   units: number;
   age: number;
   area: number;
-  recent_price: number;
-  price_change_rate: number;
+  exclusive_m2?: number | null;
   lat: number;
   lng: number;
+  distance_m?: number | null;
+  similarity?: number | null;
+  recent_price: number;
+  price_change_rate: number;
+  price_diff_pct?: number | null;
 }
 
 // 인근 유사 물건 동향
 export interface NearbyPropertyTrends {
   target_lat: number;
   target_lng: number;
+  target_recent_price?: number | null;
+  radius_m?: number | null;
+  avg_change_rate?: number | null;
   similar_properties: SimilarProperty[];
 }
 

@@ -26,6 +26,7 @@ def submit(
     pyeong: Optional[int] = None,
     dong: Optional[str] = None,
     ho: Optional[str] = None,
+    registry_ic_id: Optional[int] = None,
 ) -> LoanApplication:
     app = LoanApplication(
         id=str(uuid.uuid4())[:8],
@@ -43,6 +44,7 @@ def submit(
         pyeong=pyeong,
         dong=dong,
         ho=ho,
+        registry_ic_id=registry_ic_id,
     )
     db.add(app)
     db.commit()

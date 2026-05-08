@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Dict, Optional, List
 
 
 class YearlyFinancial(BaseModel):
@@ -35,7 +35,9 @@ class PropertyBasicInfo(BaseModel):
     units: Optional[int] = None
     corridor_type: Optional[str] = None
     age: Optional[int] = None
-    area: Optional[int] = None
+    area: Optional[int] = None  # 전용평형 (호환용)
+    exclusive_m2: Optional[float] = None
+    supply_m2: Optional[float] = None
     location_score: Optional[int] = None
     address: str
 
@@ -110,11 +112,32 @@ class NaverListings(BaseModel):
     history: List[PricePoint]  # 최근 3개월 호가 (여러 건)
 
 
+class ForecastPoint(BaseModel):
+    """JB 시세 미래 예측 (90% 신뢰구간)"""
+    date: str       # YYYY-MM-DD
+    predicted: int  # 중심선
+    lower: int      # 신뢰구간 하한
+    upper: int      # 신뢰구간 상한
+
+
+class JBFairPriceDetail(BaseModel):
+    """JB 적정시세 동적 가중치 산출 상세"""
+    fair_price: int
+    weights: Dict[str, float]      # {kb, molit, naver} — 정규화된 가중치
+    sources: Dict[str, int]        # 각 소스 대표값
+    confidence: Dict[str, float]   # 정규화 전 신뢰도
+    notes: List[str]               # 산출 근거
+    history: List[PricePoint] = []  # JB 시점별 추이
+    forecast: List[ForecastPoint] = []  # 미래 12개월 예측 (90% CI)
+
+
 class CreditData(BaseModel):
     """크레딧 데이터"""
     kb_price: KBPrice
     molit_transactions: MOLITTransactions
     naver_listings: NaverListings
+    jb_fair_price: Optional[int] = None
+    jb_detail: Optional[JBFairPriceDetail] = None  # 1단계 동적 가중치 산출 상세
 
 
 class LocationScores(BaseModel):
@@ -132,7 +155,9 @@ class AIAnalysis(BaseModel):
     property_analysis: str
     rights_analysis: RightsAnalysisDetail
     market_analysis: str
-    comprehensive_opinion: Optional[str] = None  # AI 종합 의견
+    nearby_analysis: Optional[str] = None
+    comprehensive_opinion: Optional[str] = None
+    auditor_recommendation: Optional[str] = None  # 심사역 권고 의견 초안
     location_scores: Optional[LocationScores] = None
 
 
@@ -144,17 +169,24 @@ class SimilarProperty(BaseModel):
     address: str
     units: int
     age: int
-    area: int
+    area: int                          # 비교 면적 (평)
+    exclusive_m2: Optional[float] = None
     lat: float
     lng: float
+    distance_m: Optional[int] = None   # 타겟 단지로부터의 거리 (m)
+    similarity: Optional[float] = None # 유사도 점수 (0~1)
     recent_price: int
     price_change_rate: float
+    price_diff_pct: Optional[float] = None  # 타겟 vs 유사물건 가격차 (% — 양수=유사물건이 더 비쌈)
 
 
 class NearbyPropertyTrends(BaseModel):
     """인근 유사 물건지 동향"""
     target_lat: float
     target_lng: float
+    target_recent_price: Optional[int] = None  # 비교 기준이 되는 타겟 단지 최근 거래가
+    radius_m: Optional[int] = None              # 적용된 검색 반경
+    avg_change_rate: Optional[float] = None     # 인근 평균 변동률
     similar_properties: List[SimilarProperty]
 
 

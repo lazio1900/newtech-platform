@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JB 시세 예측 모델 방법론</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy: #002060;
+  --navy-dark: #001040;
+  --orange: #FF8C00;
+  --orange-light: #FFF0D0;
+  --blue: #1565C0;
+  --blue-light: #E3EEF9;
+  --teal: #0891B2;
+  --teal-light: #CFFAFE;
+  --white: #FFFFFF;
+  --off-white: #F8F9FC;
+  --gray: #64748B;
+  --gray-light: #F1F5F9;
+  --gray-border: #E2E8F0;
+  --text: #1A1A2E;
+  --green: #16A34A;
+  --green-light: #D1FAE5;
+  --red: #DC2626;
+  --red-light: #FEE2E2;
+  --purple: #7C3AED;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: 'Noto Sans KR', sans-serif;
+  background: #080818;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  min-height: 100vh; overflow: hidden;
+}
+
+.progress-bar { width:min(980px,96vw); height:3px; background:rgba(255,255,255,.1); border-radius:2px; margin-bottom:12px; overflow:hidden; }
+.progress-fill { height:100%; background:var(--teal); border-radius:2px; transition:width .4s cubic-bezier(.4,0,.2,1); }
+
+.deck { position:relative; width:min(980px,96vw); aspect-ratio:16/9; }
+
+/* slides */
+.slide { position:absolute; inset:0; border-radius:8px; overflow:hidden; opacity:0; transform:translateX(60px) scale(.97); transition:opacity .4s cubic-bezier(.4,0,.2,1), transform .4s cubic-bezier(.4,0,.2,1); pointer-events:none; }
+.slide.active { opacity:1; transform:none; pointer-events:auto; }
+.slide.exit-left { opacity:0; transform:translateX(-60px) scale(.97); }
+
+/* common */
+.top-bar { position:absolute; top:0; left:0; right:0; height:11.5%; background:var(--navy); display:flex; align-items:center; z-index:2; }
+.top-bar::before { content:''; width:4px; height:100%; background:var(--teal); flex-shrink:0; }
+.top-bar h2 { padding:0 16px; font-size:clamp(13px,2.2vw,21px); font-weight:700; color:#fff; letter-spacing:-.3px; }
+.content-area { position:absolute; top:11.5%; left:0; right:0; bottom:0; padding:14px 20px 10px; }
+.desc { font-size:clamp(9px,1.15vw,11.5px); color:var(--gray); line-height:1.6; margin-bottom:12px; }
+.note-box { background:var(--orange-light); border:1.5px solid var(--orange); border-radius:4px; padding:8px 14px; font-size:clamp(9px,1.1vw,11px); color:var(--navy); line-height:1.55; }
+.teal-note { background:var(--teal-light); border:1.5px solid var(--teal); border-radius:4px; padding:8px 14px; font-size:clamp(9px,1.1vw,11px); color:#0c4a6e; line-height:1.55; }
+.decision-box { background:#FFF7ED; border:2px solid #F97316; border-left:5px solid #F97316; border-radius:5px; padding:8px 14px; font-size:clamp(9px,1.1vw,11px); color:#7C2D12; line-height:1.6; }
+.decision-box .db-title { font-size:clamp(9px,1.15vw,11.5px); font-weight:900; color:#EA580C; display:flex; align-items:center; gap:5px; margin-bottom:5px; }
+.decision-box .db-badge { display:inline-block; background:#EA580C; color:#fff; font-size:clamp(7px,.9vw,9px); font-weight:700; padding:1px 7px; border-radius:20px; }
+.decision-box ul { padding-left:14px; margin:0; }
+.decision-box ul li { margin-bottom:2px; }
+.decision-corner { position:absolute; top:12.5%; right:0; background:#EA580C; color:#fff; font-size:clamp(8px,1vw,10px); font-weight:900; padding:4px 12px 4px 10px; border-radius:0 0 0 6px; z-index:10; display:flex; align-items:center; gap:5px; letter-spacing:.3px; box-shadow:-2px 2px 8px rgba(234,88,12,.35); animation:pulse-badge 2.4s ease-in-out infinite; }
+@keyframes pulse-badge { 0%,100%{box-shadow:-2px 2px 8px rgba(234,88,12,.35);} 50%{box-shadow:-2px 2px 16px rgba(234,88,12,.65);} }
+.dot.dot-decision:not(.active) { background:rgba(234,88,12,.55); }
+.shadow-card { background:#fff; border-radius:6px; box-shadow:0 2px 10px rgba(0,0,0,.08); overflow:hidden; }
+.card-header { padding:8px 14px; color:#fff; font-size:clamp(10px,1.35vw,13px); font-weight:700; }
+
+/* nav */
+.nav { display:flex; align-items:center; gap:14px; margin-top:14px; }
+.nav-btn { width:40px; height:40px; border-radius:50%; border:2px solid rgba(255,255,255,.25); background:rgba(255,255,255,.06); color:#fff; font-size:17px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .2s,border-color .2s,transform .15s; backdrop-filter:blur(4px); }
+.nav-btn:hover { background:var(--teal); border-color:var(--teal); transform:scale(1.08); }
+.nav-btn:disabled { opacity:.3; cursor:default; }
+.nav-btn:disabled:hover { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.25); transform:none; }
+.slide-counter { color:rgba(255,255,255,.65); font-size:13px; font-weight:500; min-width:52px; text-align:center; }
+.dot-nav { display:flex; gap:6px; align-items:center; }
+.dot { width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.22); cursor:pointer; transition:background .2s,transform .2s; }
+.dot.active { background:var(--teal); transform:scale(1.35); }
+.dot:hover:not(.active) { background:rgba(255,255,255,.5); }
+.kbd-hint { color:rgba(255,255,255,.3); font-size:11px; margin-left:auto; }
+
+/* ── S1 TITLE ── */
+#s1 { background:var(--navy); }
+#s1 .accent { position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--teal); }
+#s1 .deco1 { position:absolute; width:44%; aspect-ratio:1; border-radius:50%; background:rgba(8,145,178,.07); right:-10%; top:-22%; }
+#s1 .deco2 { position:absolute; width:28%; aspect-ratio:1; border-radius:50%; background:rgba(8,145,178,.1); right:4%; top:-4%; }
+#s1 .badge { position:absolute; top:13%; left:6%; display:inline-block; background:var(--teal); color:#fff; font-size:clamp(8px,1.1vw,11px); font-weight:700; padding:3px 12px; border-radius:2px; }
+#s1 .title { position:absolute; top:22%; left:6%; font-size:clamp(28px,5.8vw,56px); font-weight:900; color:#fff; line-height:1.08; letter-spacing:-1px; }
+#s1 .title span { color:var(--teal); }
+#s1 .sub { position:absolute; top:62%; left:6%; font-size:clamp(9px,1.3vw,13px); color:#AECEF5; line-height:1.7; }
+#s1 .series { position:absolute; top:62%; right:6%; font-size:clamp(8px,1.05vw,10.5px); color:rgba(255,255,255,.35); text-align:right; line-height:1.8; }
+#s1 .footer { position:absolute; bottom:0; left:0; right:0; height:8%; background:var(--navy-dark); display:flex; align-items:center; padding:0 6%; }
+#s1 .footer span { font-size:clamp(7px,.95vw,9.5px); color:#8899BB; }
+
+/* ── S2 WHY ── */
+#s2 { background:var(--off-white); }
+.why-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; height:calc(100% - 50px); }
+.why-card { border-radius:6px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 2px 10px rgba(0,0,0,.08); }
+.why-card .wc-head { padding:10px 14px; color:#fff; font-size:clamp(11px,1.5vw,14px); font-weight:700; display:flex; align-items:center; gap:8px; }
+.why-card .wc-body { background:#fff; padding:10px 14px; flex:1; font-size:clamp(8px,1.1vw,11px); color:var(--text); line-height:1.65; }
+.why-card .wc-verdict { padding:7px 14px; font-size:clamp(8px,1.05vw,10.5px); font-weight:700; }
+
+/* ── S3 CURRENT LIMIT ── */
+#s3 { background:var(--off-white); }
+.limit-wrap { display:grid; grid-template-columns:1fr 1fr; gap:14px; height:calc(100% - 50px); }
+.code-box { background:var(--navy); border-radius:6px; padding:14px 16px; font-family:monospace; font-size:clamp(8px,1.1vw,11px); color:#7DCCE5; line-height:1.8; }
+.code-box .cm { color:#6A9955; }
+.code-box .kw { color:#C586C0; }
+.code-box .str { color:#CE9178; }
+.code-box .num { color:#B5CEA8; }
+.limit-issues { display:flex; flex-direction:column; gap:8px; }
+.issue-row { background:#fff; border-radius:5px; border-left:4px solid var(--red); padding:8px 12px; box-shadow:0 1px 6px rgba(0,0,0,.06); }
+.issue-row h4 { font-size:clamp(9px,1.2vw,12px); color:var(--red); font-weight:700; margin-bottom:3px; }
+.issue-row p { font-size:clamp(8px,1.05vw,10.5px); color:var(--gray); line-height:1.5; }
+
+/* ── S4 WHAT IS AUTOARIMA ── */
+#s4 { background:var(--off-white); }
+.arima-concept { background:var(--navy); border-radius:8px; padding:12px 18px; color:#fff; text-align:center; font-size:clamp(11px,1.6vw,15px); font-weight:700; margin-bottom:12px; line-height:1.55; }
+.arima-concept span { color:var(--teal); }
+.analogy-grid { display:grid; grid-template-columns:1fr 40px 1fr; gap:0; flex:1; }
+.analogy-card { background:#fff; border-radius:6px; padding:12px 14px; box-shadow:0 2px 8px rgba(0,0,0,.07); }
+.analogy-card h4 { font-size:clamp(10px,1.35vw,13px); font-weight:700; margin-bottom:8px; }
+.analogy-row { display:flex; align-items:flex-start; gap:6px; padding:4px 0; border-bottom:1px solid var(--gray-light); font-size:clamp(8px,1.05vw,10.5px); color:var(--text); line-height:1.5; }
+.analogy-row:last-child { border:none; }
+.analogy-icon { flex-shrink:0; font-size:clamp(11px,1.4vw,13px); }
+.arr-mid { display:flex; align-items:center; justify-content:center; font-size:clamp(16px,2.2vw,22px); color:var(--teal); font-weight:900; }
+
+/* ── S5 HOW IT WORKS ── */
+#s5 { background:var(--off-white); }
+.how-flow { display:flex; flex-direction:column; gap:8px; height:calc(100% - 50px); }
+.how-step { background:#fff; border-radius:6px; padding:10px 14px; box-shadow:0 2px 8px rgba(0,0,0,.06); display:flex; align-items:flex-start; gap:12px; position:relative; flex:1; }
+.how-step::after { content:'↓'; position:absolute; bottom:-14px; left:50%; transform:translateX(-50%); color:var(--teal); font-size:14px; font-weight:900; z-index:1; }
+.how-step:last-child::after { display:none; }
+.step-num { width:clamp(26px,3.5vw,34px); height:clamp(26px,3.5vw,34px); border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:clamp(11px,1.5vw,14px); flex-shrink:0; }
+.step-content h4 { font-size:clamp(10px,1.3vw,13px); font-weight:700; color:var(--navy); margin-bottom:3px; }
+.step-content p { font-size:clamp(8px,1.05vw,10.5px); color:var(--gray); line-height:1.55; }
+.step-tag { margin-left:auto; flex-shrink:0; font-size:clamp(7px,.9vw,9px); font-weight:700; padding:3px 8px; border-radius:3px; white-space:nowrap; align-self:center; }
+
+/* ── S6 CONFIDENCE INTERVAL ── */
+#s6 { background:var(--off-white); }
+.ci-wrap { display:grid; grid-template-columns:1.2fr 1fr; gap:14px; height:calc(100% - 44px); }
+.ci-chart { background:#fff; border-radius:6px; padding:12px 14px; box-shadow:0 2px 10px rgba(0,0,0,.08); display:flex; flex-direction:column; }
+.ci-chart h4 { font-size:clamp(10px,1.3vw,13px); font-weight:700; color:var(--navy); margin-bottom:8px; }
+.chart-svg-wrap { flex:1; }
+.ci-explain { display:flex; flex-direction:column; gap:8px; }
+.ci-item { background:#fff; border-radius:5px; padding:9px 12px; box-shadow:0 1px 6px rgba(0,0,0,.06); border-left:4px solid; }
+.ci-item h4 { font-size:clamp(9px,1.2vw,12px); font-weight:700; margin-bottom:3px; }
+.ci-item p { font-size:clamp(8px,1.05vw,10.5px); color:var(--gray); line-height:1.5; }
+
+/* ── S7 LTV APPLICATION ── */
+#s7 { background:var(--off-white); }
+.ltv-wrap { display:grid; grid-template-columns:1fr 1fr; gap:14px; height:calc(100% - 44px); }
+.ltv-now, .ltv-new { border-radius:6px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,.08); display:flex; flex-direction:column; }
+.ltv-body { background:#fff; padding:10px 14px; flex:1; }
+.ltv-row { display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px solid var(--gray-light); font-size:clamp(8px,1.05vw,10.5px); }
+.ltv-row:last-child { border:none; }
+.ltv-row .lbl { color:var(--text); }
+.ltv-row .val-bad { color:var(--red); font-weight:700; }
+.ltv-row .val-good { color:var(--green); font-weight:700; }
+.ltv-verdict { padding:8px 14px; font-size:clamp(8px,1.05vw,10.5px); font-weight:700; line-height:1.5; }
+
+/* ── S8 FLOW ── */
+#s8 { background:var(--off-white); }
+.pipeline { display:flex; align-items:stretch; gap:0; border-radius:6px; overflow:hidden; margin-bottom:12px; }
+.pipe-node { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:10px 6px; color:#fff; position:relative; gap:3px; }
+.pipe-node::after { content:'▶'; position:absolute; right:-9px; top:50%; transform:translateY(-50%); font-size:11px; color:rgba(255,255,255,.5); z-index:2; }
+.pipe-node:last-child::after { display:none; }
+.pipe-node h4 { font-size:clamp(9px,1.2vw,12px); font-weight:700; text-align:center; }
+.pipe-node p { font-size:clamp(7px,.9vw,9px); opacity:.8; text-align:center; }
+.output-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.output-card { background:#fff; border-radius:6px; padding:10px 12px; box-shadow:0 2px 8px rgba(0,0,0,.07); border-top:3px solid; }
+.output-card h4 { font-size:clamp(10px,1.3vw,13px); font-weight:700; color:var(--navy); margin-bottom:5px; }
+.output-card p { font-size:clamp(8px,1.05vw,10.5px); color:var(--gray); line-height:1.55; }
+.output-card .out-val { font-size:clamp(12px,1.7vw,16px); font-weight:700; margin:4px 0; }
+
+/* ── S9 CLOSING ── */
+#s9 { background:var(--navy); }
+#s9 .accent { position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--teal); }
+#s9 .deco { position:absolute; width:50%; aspect-ratio:1; border-radius:50%; background:rgba(8,145,178,.05); right:-12%; bottom:-25%; }
+#s9 .close-label { position:absolute; top:12%; left:6%; font-size:clamp(10px,1.3vw,13px); color:var(--teal); font-weight:700; letter-spacing:1px; }
+#s9 .close-items { position:absolute; top:24%; left:6%; right:6%; }
+.close-row { display:flex; align-items:flex-start; gap:10px; margin-bottom:10px; }
+.close-num { width:clamp(22px,2.8vw,28px); height:clamp(22px,2.8vw,28px); background:var(--teal); border-radius:3px; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:clamp(10px,1.25vw,12px); flex-shrink:0; }
+.close-text { font-size:clamp(10px,1.4vw,13.5px); color:#D0E4FF; line-height:1.55; padding-top:1px; }
+#s9 .footer { position:absolute; bottom:0; left:0; right:0; height:8%; background:var(--navy-dark); display:flex; align-items:center; padding:0 6%; }
+#s9 .footer span { font-size:clamp(7px,.9vw,9px); color:#8899BB; }
+</style>
+</head>
+<body>
+
+<div class="progress-bar"><div class="progress-fill" id="pf"></div></div>
+
+<div class="deck" id="deck">
+
+<!-- ══ S1 TITLE ══ -->
+<div class="slide active" id="s1">
+  <div class="accent"></div>
+  <div class="deco1"></div>
+  <div class="deco2"></div>
+  <div class="badge">방법론 설명자료 2편</div>
+  <div class="title">시세 예측 모델<br><span>AutoARIMA</span></div>
+  <div class="sub">과거 시세 패턴에서 미래를 읽고<br>신뢰구간으로 보수적 LTV 기준을 만드는 방법</div>
+  <div class="series">1편 : JB 적정시세 산출 방법론<br>2편 : 시세 예측 모델 (현재)</div>
+  <div class="footer"><span>JB우리캐피탈  |  담보금융심사팀  |  내부 기획자료</span></div>
+</div>
+
+<!-- ══ S2 WHY ══ -->
+<div class="slide" id="s2">
+  <div class="top-bar"><h2>예측이 왜 필요한가</h2></div>
+  <div class="content-area" style="display:flex;flex-direction:column;">
+    <div class="desc">적정시세는 현재 가격을 정확히 아는 것입니다. 하지만 심사에서 진짜 필요한 건 대출 실행 이후의 시세입니다.</div>
+    <div class="why-grid" style="flex:1;">
+      <div class="why-card">
+        <div class="wc-head" style="background:var(--blue);">📋 &nbsp;심사 시점</div>
+        <div class="wc-body">
+          오늘 적정시세 : 8억원<br>
+          대출 신청금액 : 4억원<br>
+          LTV : 50% → 안전<br><br>
+          <strong>현재는 문제 없음</strong>
+        </div>
+        <div class="wc-verdict" style="background:var(--blue-light);color:var(--blue);">✓ 현재 LTV 안전</div>
+      </div>
+      <div class="why-card">
+        <div class="wc-head" style="background:var(--orange);">⏱ &nbsp;대출 실행 후 12개월</div>
+        <div class="wc-body">
+          시세가 6억원으로 하락 시<br>
+          LTV : 66.7% → 주의<br><br>
+          시세가 5억원으로 하락 시<br>
+          LTV : 80% → <strong style="color:var(--red);">위험</strong>
+        </div>
+        <div class="wc-verdict" style="background:var(--orange-light);color:var(--orange);">⚠ 미래 LTV는 알 수 없음</div>
+      </div>
+      <div class="why-card">
+        <div class="wc-head" style="background:var(--teal);">🎯 &nbsp;예측이 주는 것</div>
+        <div class="wc-body">
+          "12개월 후 시세가<br>
+          6억 5천~7억 5천 사이일<br>
+          가능성이 90%입니다"<br><br>
+          <strong>하한선 기준 LTV 선제 계산</strong>
+        </div>
+        <div class="wc-verdict" style="background:var(--teal-light);color:var(--teal);">✓ 보수적 리스크 판단 가능</div>
+      </div>
+    </div>
+    <div class="teal-note" style="margin-top:10px;">
+      → &nbsp;예측의 목적은 "정확한 미래값"이 아닙니다. <strong>"가장 나쁜 시나리오에서도 LTV가 안전한가"</strong>를 미리 확인하는 것입니다.
+    </div>
+  </div>
+</div>
+
+<!-- ══ S3 현재 예측 한계 ══ -->
+<div class="slide" id="s3">
+  <div class="top-bar"><h2>현재 예측 방식의 한계</h2></div>
+  <div class="content-area" style="display:flex;flex-direction:column;">
+    <div class="desc">현재 코드는 단순 선형 예측을 사용합니다. 직관적이지만 근본적인 한계가 있습니다.</div>
+    <div class="limit-wrap" style="flex:1;">
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="code-box" style="flex:1;">
+          <div class="cm">// 현재 예측 로직</div>
+          <div><span class="kw">const</span> isUptrend = latestNaverPrice &gt; latestMolitPrice;</div>
+          <div><span class="kw">const</span> annualRate = isUptrend ? <span class="num">0.05</span> : <span class="num">-0.05</span>;</div>
+          <br>
+          <div class="cm">// 매달 동일 비율로 직선 증가/감소</div>
+          <div>predictedPrice = latestJbPrice</div>
+          <div>&nbsp;&nbsp;* Math.pow(<span class="num">1</span> + monthlyRate, m);</div>
+          <br>
+          <div class="cm">// 불확실성(신뢰구간) 없음</div>
+          <div class="cm">// 상승 또는 하락 둘 중 하나</div>
+        </div>
+        <div class="teal-note">
+          코드 자체는 단순 선형 ±5% 직선<br>
+          → 심사 판단 근거로 쓰기엔 너무 단순
+        </div>
+      </div>
+      <div class="limit-issues">
+        <div class="issue-row">
+          <h4>호가 vs 실거래만 보고 상승/하락 결정</h4>
+          <p>호가가 실거래보다 높다고 항상 상승장이 아님<br>호가는 항상 희망가 포함 → 구조적 편향 존재</p>
+        </div>
+        <div class="issue-row">
+          <h4>±5% 근거 없음</h4>
+          <p>어떤 단지든 동일하게 5% 적용<br>실제 단지별 변동성은 천차만별</p>
+        </div>
+        <div class="issue-row">
+          <h4>직선 예측의 한계</h4>
+          <p>부동산은 직선으로 오르내리지 않음<br>계절성, 변곡점, 둔화 구간 모두 무시</p>
+        </div>
+        <div class="issue-row">
+          <h4>불확실성 표현 불가</h4>
+          <p>단일값만 출력 → "이 예측이 얼마나 믿을 만한가"<br>전달 불가 → 심사 근거로 활용 어려움</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ S4 WHAT IS AUTOARIMA ══ -->
+<div class="slide" id="s4">
+  <div class="top-bar"><h2>AutoARIMA 란 무엇인가</h2></div>
+  <div class="content-area" style="display:flex;flex-direction:column;">
+    <div class="arima-concept">
+      "과거 시세 패턴을 통계적으로 분석해서<br>
+      <span>가장 잘 맞는 예측 공식을 자동으로 찾아주는 모델</span>"
+    </div>
+    <div class="analogy-grid" style="flex:1;">
+      <div class="analogy-card">
+        <h4 style="color:var(--gray);">🧑‍💼 &nbsp;심사역이 하는 일 (직관)</h4>
+        <div class="analogy-row"><span class="analogy-icon">👁</span>"이 단지는 봄마다 오르더라"</div>
+        <div class="analogy-row"><span class="analogy-icon">👁</span>"금리 오른 후 6개월 뒤에 꺾였었지"</div>
+        <div class="analogy-row"><span class="analogy-icon">👁</span>"최근 3개월 하락세니까 조심해야겠다"</div>
+        <div class="analogy-row"><span class="analogy-icon">👁</span>"비슷한 단지 패턴이랑 비교해보면..."</div>
+        <div style="margin-top:8px;padding:6px 8px;background:var(--gray-light);border-radius:4px;font-size:clamp(7px,.95vw,9.5px);color:var(--gray);">
+          경험 많은 심사역만 가능 · 주관적 · 문서화 어려움
+        </div>
+      </div>
+      <div class="arr-mid">→</div>
+      <div class="analogy-card">
+        <h4 style="color:var(--teal);">🤖 &nbsp;AutoARIMA가 하는 일 (통계)</h4>
+        <div class="analogy-row"><span class="analogy-icon" style="color:var(--teal);">📊</span>과거 시세 수십~수백 포인트 분석</div>
+        <div class="analogy-row"><span class="analogy-icon" style="color:var(--teal);">🔍</span>계절성·추세·패턴 자동 발견</div>
+        <div class="analogy-row"><span class="analogy-icon" style="color:var(--teal);">⚙️</span>수백 가지 공식 조합 테스트</div>
+        <div class="analogy-row"><span class="analogy-icon" style="color:var(--teal);">✅</span>오차 가장 작은 공식 자동 채택</div>
+        <div style="margin-top:8px;padding:6px 8px;background:var(--teal-light);border-radius:4px;font-size:clamp(7px,.95vw,9.5px);color:#0c4a6e;">
+          누구나 동일한 결과 · 객관적 · 근거 문서화 가능
+        </div>
+      </div>
+    </div>
+    <div class="note-box" style="margin-top:10px;">
+      💡 &nbsp;AutoARIMA는 SARIMA(계절성 반영 시계열 모델)의 파라미터를 <strong>자동으로</strong> 최적화해주는 도구입니다. 사람이 수동으로 찾아야 했던 최적 공식을 알고리즘이 대신 찾아줍니다.
+    </div>
+  </div>
+</div>
+
+<!-- ══ S5 HOW IT WORKS ══ -->
+<div class="slide" id="s5">
+  <div class="top-bar"><h2>AutoARIMA 가 하는 일 : 단계별로 보면</h2></div>
+  <div class="decision-corner">✋ 현업 판단 필요</div>
+  <div class="content-area" style="display:flex;flex-direction:column;">
+    <div class="how-flow" style="flex:1;">
+      <div class="how-step">
+        <div class="step-num" style="background:var(--teal);">1</div>
+        <div class="step-content">
+          <h4>과거 시세 데이터 입력</h4>
+          <p>단지 + 평형 기준 월별 적정시세 이력을 입력합니다. 최소 12개월, 이상적으로는 24~36개월 데이터를 사용합니다.</p>
+        </div>
+        <div class="step-tag" style="background:var(--teal-light);color:var(--teal);">데이터 준비</div>
+      </div>
+      <div class="how-step">
+        <div class="step-num" style="background:var(--blue);">2</div>
+        <div class="step-content">
+          <h4>패턴 자동 탐색</h4>
+          <p>"이 데이터는 몇 달 전 패턴을 따르는가", "계절성이 있는가", "추세가 있는가"를 수백 가지 조합으로 자동 테스트합니다.</p>
+        </div>
+        <div class="step-tag" style="background:var(--blue-light);color:var(--blue);">자동 최적화</div>
+      </div>
+      <div class="how-step">
+        <div class="step-num" style="background:var(--purple);">3</div>
+        <div class="step-content">
+          <h4>최적 공식 선택</h4>
+          <p>AIC(정보기준) 지표로 과적합 없이 가장 잘 설명하는 공식을 자동 채택합니다. 사람이 개입하지 않습니다.</p>
+        </div>
+        <div class="step-tag" style="background:var(--purple-light);color:var(--purple);">자동 선택</div>
+      </div>
+      <div class="how-step">
+        <div class="step-num" style="background:var(--orange);">4</div>
+        <div class="step-content">
+          <h4>예측값 + 신뢰구간 출력</h4>
+          <p>대출기간(예: 12개월) 동안의 예측 시세와 함께 상한·하한 신뢰구간을 함께 출력합니다. 이 하한선이 심사의 핵심 기준이 됩니다.</p>
+        </div>
+        <div class="step-tag" style="background:var(--orange-light);color:var(--orange);">결과 출력</div>
+      </div>
+    </div>
+    <div class="decision-box" style="margin-top:10px;">
+      <div class="db-title">✋ 현업 판단 필요 <span class="db-badge">슬라이드 5</span></div>
+      <ul>
+        <li><strong>예측 기간 설정</strong> — 기본값 12개월이 심사 기준상 적절한지 확인. 단기 대출(6개월)과 장기 대출(24개월)에 다르게 적용할지 여부도 결정 필요</li>
+      </ul>
+    </div>
+
+<!-- ══ S6 CONFIDENCE INTERVAL ══ -->
+<div class="slide" id="s6">
+  <div class="top-bar"><h2>신뢰구간 : 예측의 불확실성을 숫자로 표현한다</h2></div>
+  <div class="decision-corner">✋ 현업 판단 필요</div>
+  <div class="content-area" style="display:flex;flex-direction:column;">
+    <div class="desc">단일 예측값 하나보다 "어느 범위 안에 있을 가능성이 90%"가 심사에 훨씬 유용합니다.</div>
+    <div class="ci-wrap" style="flex:1;">
+      <div class="ci-chart">
+        <h4>예측 결과 예시 (12개월 예측)</h4>
+        <div class="chart-svg-wrap">
+          <svg viewBox="0 0 420 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;">
+            <defs>
+              <linearGradient id="bandGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#0891B2" stop-opacity="0.15"/>
+                <stop offset="100%" stop-color="#0891B2" stop-opacity="0.05"/>
+              </linearGradient>
+            </defs>
+            <!-- grid -->
+            <line x1="50" y1="10" x2="50" y2="170" stroke="#E2E8F0" stroke-width="1"/>
+            <line x1="50" y1="170" x2="410" y2="170" stroke="#E2E8F0" stroke-width="1"/>
+            <line x1="50" y1="50" x2="410" y2="50" stroke="#E2E8F0" stroke-width=".5" stroke-dasharray="3,3"/>
+            <line x1="50" y1="90" x2="410" y2="90" stroke="#E2E8F0" stroke-width=".5" stroke-dasharray="3,3"/>
+            <line x1="50" y1="130" x2="410" y2="130" stroke="#E2E8F0" stroke-width=".5" stroke-dasharray="3,3"/>
+            <!-- y labels -->
+            <text x="44" y="53" font-size="9" fill="#94A3B8" text-anchor="end">9억</text>
+            <text x="44" y="93" font-size="9" fill="#94A3B8" text-anchor="end">8억</text>
+            <text x="44" y="133" font-size="9" fill="#94A3B8" text-anchor="end">7억</text>
+            <text x="44" y="173" font-size="9" fill="#94A3B8" text-anchor="end">6억</text>
+            <!-- x labels -->
+            <text x="50"  y="183" font-size="8" fill="#94A3B8" text-anchor="middle">현재</text>
+            <text x="140" y="183" font-size="8" fill="#94A3B8" text-anchor="middle">+3M</text>
+            <text x="230" y="183" font-size="8" fill="#94A3B8" text-anchor="middle">+6M</text>
+            <text x="320" y="183" font-size="8" fill="#94A3B8" text-anchor="middle">+9M</text>
+            <text x="410" y="183" font-size="8" fill="#94A3B8" text-anchor="middle">+12M</text>
+            <!-- actual history line -->
+            <polyline points="50,90 80,85 110,88 140,80 170,75" fill="none" stroke="#002060" stroke-width="2.5"/>
+            <!-- divider -->
+            <line x1="170" y1="10" x2="170" y2="170" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="4,3"/>
+            <text x="172" y="20" font-size="8" fill="#94A3B8">예측 시작</text>
+            <!-- confidence band -->
+            <polygon points="170,75 230,68 320,60 410,52 410,118 320,128 230,118 170,85" fill="url(#bandGrad)"/>
+            <polygon points="170,75 230,68 320,60 410,52 410,85 320,90 230,88 170,80" fill="rgba(8,145,178,0.08)"/>
+            <!-- upper bound -->
+            <polyline points="170,68 230,58 320,48 410,38" fill="none" stroke="#0891B2" stroke-width="1.5" stroke-dasharray="5,3" opacity=".7"/>
+            <!-- lower bound -->
+            <polyline points="170,85 230,100 320,115 410,128" fill="none" stroke="#DC2626" stroke-width="1.5" stroke-dasharray="5,3" opacity=".7"/>
+            <!-- center prediction -->
+            <polyline points="170,78 230,82 320,85 410,88" fill="none" stroke="#0891B2" stroke-width="2.5"/>
+            <!-- dots -->
+            <circle cx="170" cy="78" r="4" fill="#0891B2"/>
+            <circle cx="410" cy="88" r="4" fill="#0891B2"/>
+            <!-- lower bound dot -->
+            <circle cx="410" cy="128" r="5" fill="#DC2626" opacity=".8"/>
+            <!-- label -->
+            <text x="414" y="131" font-size="9" fill="#DC2626" font-weight="bold">하한선</text>
+            <text x="414" y="91" font-size="9" fill="#0891B2">예측값</text>
+            <text x="414" y="41" font-size="9" fill="#0891B2" opacity=".7">상한선</text>
+            <!-- legend -->
+            <rect x="55" y="15" width="10" height="3" fill="#002060" rx="1"/>
+            <text x="68" y="20" font-size="8" fill="#64748B">실제 시세</text>
+            <rect x="110" y="15" width="10" height="2" fill="#0891B2" rx="1"/>
+            <text x="123" y="20" font-size="8" fill="#64748B">예측</text>
+            <rect x="148" y="15" width="20" height="7" fill="rgba(8,145,178,0.15)" rx="1"/>
+            <text x="171" y="20" font-size="8" fill="#64748B">90% 구간</text>
+          </svg>
+        </div>
+      </div>
+      <div class="ci-explain">
+        <div class="ci-item" style="border-color:var(--teal);">
+          <h4 style="color:var(--teal);">📈 예측값 (중앙선)</h4>
+          <p>가장 가능성 높은 미래 시세. 참고값으로 활용하지만 심사 기준으로 직접 쓰지 않음</p>
+        </div>
+        <div class="ci-item" style="border-color:var(--blue);">
+          <h4 style="color:var(--blue);">🔵 신뢰구간 (90%)</h4>
+          <p>실제 시세가 이 범위 안에 있을 가능성 90%. 범위가 넓을수록 예측 불확실성 높음을 의미</p>
+        </div>
+        <div class="ci-item" style="border-color:var(--red);">
+          <h4 style="color:var(--red);">🔴 하한선 → 심사 핵심 기준</h4>
+          <p>가장 나쁜 시나리오에서의 시세. <strong>이 하한선 기준으로 LTV를 계산</strong>해야 보수적 심사 가능</p>
+        </div>
+        <div class="ci-item" style="border-color:var(--green);">
+          <h4 style="color:var(--green);">✅ 실무 활용 원칙</h4>
+          <p>하한선 기준 LTV ≤ 70% → 대출 실행 안전<br>70~85% → 조건부 / 85% 초과 → 한도 재검토</p>
+        </div>
+        <div class="decision-box" style="margin-top:8px;">
+          <div class="db-title">✋ 현업 판단 필요 <span class="db-badge">슬라이드 6</span></div>
+          <ul>
+            <li><strong>신뢰구간 %를 90%로 할지 95%로 할지 결정 필요</strong> — 90%는 상대적으로 좁은 구간(덜 보수적), 95%는 넓은 구간(더 보수적). 심사 보수성 기준에 따라 선택</li>
+          </ul>
+        </div>
+
+<!-- ══ S7 LTV APPLICATION ══ -->
+<div class="slide" id="s7">
+  <div class="top-bar"><h2>예측 시세를 LTV 심사에 적용하는 방법</h2></div>
+  <div class="decision-corner">✋ 현업 판단 필요</div>
+  <div class="content-area" style="display:flex;flex-direction:column;">
+    <div class="desc">같은 대출 조건이라도 예측 시세 기준 LTV까지 함께 보면 리스크가 다르게 보입니다.</div>
+    <div class="ltv-wrap" style="flex:1;">
+      <div class="ltv-now">
+        <div class="card-header" style="background:var(--blue);">현재 방식 (현재 시세만 반영)</div>
+        <div class="ltv-body">
+          <div class="ltv-row"><span class="lbl">현재 적정시세</span><span style="font-weight:700;">8억원</span></div>
+          <div class="ltv-row"><span class="lbl">선순위 채권 합계</span><span style="font-weight:700;">4억원</span></div>
+          <div class="ltv-row"><span class="lbl">현재 LTV</span><span class="val-good">50.0% ✓ 안전</span></div>
+          <div class="ltv-row"><span class="lbl">12개월 후 예측</span><span style="color:var(--gray);">알 수 없음</span></div>
+          <div class="ltv-row" style="border:none;"><span class="lbl">미래 LTV</span><span style="color:var(--gray);">계산 불가</span></div>
+        </div>
+        <div class="ltv-verdict" style="background:var(--blue-light);color:var(--blue);">
+          현재는 안전해 보이지만<br>12개월 후 리스크는 미확인 상태
+        </div>
+      </div>
+      <div class="ltv-new">
+        <div class="card-header" style="background:var(--teal);">개선 방식 (예측 신뢰구간 반영)</div>
+        <div class="ltv-body">
+          <div class="ltv-row"><span class="lbl">현재 적정시세</span><span style="font-weight:700;">8억원</span></div>
+          <div class="ltv-row"><span class="lbl">선순위 채권 합계</span><span style="font-weight:700;">4억원</span></div>
+          <div class="ltv-row"><span class="lbl">현재 LTV</span><span class="val-good">50.0% ✓ 안전</span></div>
+          <div class="ltv-row"><span class="lbl">12개월 후 예측값</span><span style="font-weight:700;color:var(--teal);">7억 8천</span></div>
+          <div class="ltv-row"><span class="lbl">12개월 후 <strong>하한선</strong></span><span style="font-weight:700;color:var(--red);">6억 5천</span></div>
+          <div class="ltv-row" style="border:none;"><span class="lbl">하한선 기준 LTV</span><span class="val-bad">61.5% → 주의</span></div>
+        </div>
+        <div class="ltv-verdict" style="background:var(--teal-light);color:#0c4a6e;">
+          현재는 안전하지만 최악 시나리오 기준<br>LTV 61.5% → 한도 조정 또는 조건부 실행 검토
+        </div>
+      </div>
+    </div>
+    <div class="teal-note" style="margin-top:10px;">
+      → &nbsp;같은 4억 대출도 미래 하한선 기준 LTV를 함께 보면 완전히 다른 판단이 나올 수 있습니다.
+    </div>
+    <div class="decision-box" style="margin-top:8px;">
+      <div class="db-title">✋ 현업 판단 필요 <span class="db-badge">슬라이드 7</span></div>
+      <ul>
+        <li><strong>LTV 임계값 기준 확정</strong> — 현재 예시는 70%(안전) / 85%(위험) 기준. 사내 심사 기준과 일치하는지 확인 필요</li>
+        <li><strong>하한선 기준 적용 범위</strong> — 모든 대출에 동일 적용할지, 대출 금액·기간·지역에 따라 기준을 달리 할지 결정 필요</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ══ S8 PIPELINE ══ -->
+<div class="slide" id="s8">
+  <div class="top-bar"><h2>전체 예측 파이프라인</h2></div>
+  <div class="content-area" style="display:flex;flex-direction:column;">
+    <div class="pipeline">
+      <div class="pipe-node" style="background:var(--navy);"><h4>적정시세</h4><p>1편 산출 결과</p></div>
+      <div class="pipe-node" style="background:var(--blue);"><h4>시계열 변환</h4><p>단지+평형 월별</p></div>
+      <div class="pipe-node" style="background:var(--teal);"><h4>AutoARIMA</h4><p>패턴 자동 탐색</p></div>
+      <div class="pipe-node" style="background:var(--purple);"><h4>예측 + 구간</h4><p>12개월 + 상하한</p></div>
+      <div class="pipe-node" style="background:var(--orange);"><h4>LTV 산출</h4><p>하한선 기준</p></div>
+    </div>
+    <div class="output-grid" style="flex:1;">
+      <div class="output-card" style="border-color:var(--teal);">
+        <h4>예측 시세 차트</h4>
+        <div class="out-val" style="color:var(--teal);">7억 8천만원</div>
+        <p>12개월 후 가장 가능성 높은 시세. 추세 방향 파악에 활용</p>
+      </div>
+      <div class="output-card" style="border-color:var(--red);">
+        <h4>하한선 (보수적 기준)</h4>
+        <div class="out-val" style="color:var(--red);">6억 5천만원</div>
+        <p>90% 신뢰구간 하한. LTV 심사의 핵심 기준값으로 활용</p>
+      </div>
+      <div class="output-card" style="border-color:var(--orange);">
+        <h4>미래 LTV (하한 기준)</h4>
+        <div class="out-val" style="color:var(--orange);">61.5%</div>
+        <p>하한선 시세 기준 LTV. 이 값으로 대출 실행 여부 최종 판단</p>
+      </div>
+    </div>
+    <div class="note-box" style="margin-top:10px;">
+      💡 &nbsp;데이터가 적은 단지(거래 10건 미만)는 예측 신뢰구간이 넓어집니다. 넓은 구간 = 불확실성 높음 → 그 자체로 리스크 신호입니다.
+    </div>
+  </div>
+</div>
+
+<!-- ══ S9 CLOSING ══ -->
+<div class="slide" id="s9">
+  <div class="accent"></div>
+  <div class="deco"></div>
+  <div class="close-label">핵심 요약</div>
+  <div class="close-items">
+    <div class="close-row"><div class="close-num">1</div><div class="close-text">예측의 목적은 <strong style="color:var(--teal);">정확한 미래값</strong>이 아니라 <strong style="color:var(--teal);">최악 시나리오에서의 LTV 확인</strong></div></div>
+    <div class="close-row"><div class="close-num">2</div><div class="close-text">AutoARIMA가 <strong style="color:var(--teal);">과거 패턴에서 최적 예측 공식</strong>을 자동으로 찾아줌</div></div>
+    <div class="close-row"><div class="close-num">3</div><div class="close-text">단일 예측값보다 <strong style="color:var(--teal);">신뢰구간(상한·하한)</strong>이 심사에 훨씬 유용</div></div>
+    <div class="close-row"><div class="close-num">4</div><div class="close-text"><strong style="color:var(--teal);">하한선 기준 LTV</strong>를 현재 LTV와 함께 병기 → 미래 리스크 선제 판단</div></div>
+    <div class="close-row"><div class="close-num">5</div><div class="close-text">데이터 부족 단지 = <strong style="color:var(--teal);">신뢰구간 넓어짐</strong> → 그 자체가 리스크 신호</div></div>
+  </div>
+  <div class="footer"><span>JB우리캐피탈  |  담보금융심사팀  |  내부 기획자료</span></div>
+</div>
+
+</div><!-- /deck -->
+
+<div class="nav">
+  <button class="nav-btn" id="prevBtn" onclick="navigate(-1)" disabled>&#8592;</button>
+  <div class="dot-nav" id="dotNav"></div>
+  <span class="slide-counter" id="counter">1 / 9</span>
+  <button class="nav-btn" id="nextBtn" onclick="navigate(1)">&#8594;</button>
+  <span class="kbd-hint">← → 키보드</span>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0, animating = false;
+
+  const dotNav = document.getElementById('dotNav');
+  const decisionSlides2 = new Set([4, 5, 6]); // 슬라이드 5,6,7 (0-indexed)
+  for (let i = 0; i < total; i++) {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '') + (decisionSlides2.has(i) ? ' dot-decision' : '');
+    d.title = decisionSlides2.has(i) ? '현업 판단 필요' : '';
+    d.onclick = () => goTo(i);
+    dotNav.appendChild(d);
+  }
+
+  function updateUI() {
+    document.getElementById('counter').textContent = `${current + 1} / ${total}`;
+    document.getElementById('prevBtn').disabled = current === 0;
+    document.getElementById('nextBtn').disabled = current === total - 1;
+    document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === current));
+    document.getElementById('pf').style.width = `${((current + 1) / total) * 100}%`;
+  }
+
+  function goTo(idx) {
+    if (idx === current || animating || idx < 0 || idx >= total) return;
+    animating = true;
+    const dir = idx > current ? 1 : -1;
+    const prevIdx = current;
+
+    // 이전 슬라이드 퇴장
+    slides[prevIdx].classList.remove('active');
+    slides[prevIdx].classList.add('exit-left');
+
+    // 새 슬라이드: transition 끄고 초기 위치 세팅
+    current = idx;
+    slides[current].style.transition = 'none';
+    slides[current].style.transform = `translateX(${dir > 0 ? 60 : -60}px) scale(.97)`;
+    slides[current].style.opacity = '0';
+
+    // 강제 리플로우
+    slides[current].getBoundingClientRect();
+
+    // transition 복원 후 진입 애니메이션
+    slides[current].style.transition = '';
+    slides[current].style.transform = '';
+    slides[current].style.opacity = '';
+    slides[current].classList.add('active');
+    updateUI();
+
+    setTimeout(() => {
+      slides.forEach(s => {
+        s.classList.remove('exit-left');
+        s.style.transition = '';
+        s.style.transform = '';
+        s.style.opacity = '';
+      });
+      animating = false;
+    }, 480);
+  }
+
+  function navigate(d) { goTo(current + d); }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') navigate(1);
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   navigate(-1);
+  });
+  let tx = 0;
+  document.getElementById('deck').addEventListener('touchstart', e => { tx = e.touches[0].clientX; });
+  document.getElementById('deck').addEventListener('touchend',   e => { const dx = e.changedTouches[0].clientX - tx; if (Math.abs(dx) > 50) navigate(dx < 0 ? 1 : -1); });
+
+  updateUI();
+</script>
+</body>
+</html>

@@ -22,10 +22,10 @@ export default function AIPropertyAnalysis({ analysis, locationScores }: AIPrope
   if (!analysis) return null;
 
   const radarData: RadarDataItem[] | null = locationScores ? [
-    { axis: '인접역 거리', value: locationScores.station_walk, fullMark: 100 },
-    { axis: '업무지구 이동시간', value: locationScores.commute_time, fullMark: 100 },
-    { axis: '세대수/연식', value: locationScores.units_score, fullMark: 100 },
-    { axis: '초등학교 거리', value: locationScores.school_walk, fullMark: 100 },
+    { axis: '역세권', value: locationScores.station_walk, fullMark: 100 },
+    { axis: '노선 다양성', value: locationScores.commute_time, fullMark: 100 },
+    { axis: '단지 규모', value: locationScores.units_score, fullMark: 100 },
+    { axis: '학군', value: locationScores.school_walk, fullMark: 100 },
     { axis: '생활환경', value: locationScores.living_env, fullMark: 100 },
     { axis: '자연환경', value: locationScores.nature_env, fullMark: 100 },
   ] : null;

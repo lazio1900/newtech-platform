@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   ResponsiveContainer, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend
+  XAxis, YAxis, CartesianGrid, Tooltip
 } from 'recharts';
 import type { PricePerPyeongTrend } from '@/types/loan';
 
@@ -38,11 +38,20 @@ export default function PricePerPyeongChart({ data }: PricePerPyeongChartProps) 
 
   return (
     <div className="info-card">
-      <h3>단지/읍면동/시군구 평단가 추이</h3>
-      <div className="pyeong-chart-labels">
-        <span className="pyeong-label">단지: {data.complex_name}</span>
-        <span className="pyeong-label">동: {data.dong_name}</span>
-        <span className="pyeong-label">구: {data.sigungu_name}</span>
+      <h3>단지 평단가 vs 동/구 평균 추이</h3>
+      <div className="pyeong-chart-labels" style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <span className="pyeong-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#006FBD' }} />
+          {data.complex_name} 평단가
+        </span>
+        <span className="pyeong-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#FF8C00' }} />
+          {data.dong_name} 평균
+        </span>
+        <span className="pyeong-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#20c997' }} />
+          {data.sigungu_name} 평균
+        </span>
       </div>
       <ResponsiveContainer width="100%" height={320}>
         <LineChart data={data.data} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
@@ -55,18 +64,13 @@ export default function PricePerPyeongChart({ data }: PricePerPyeongChartProps) 
             width={70}
           />
           <Tooltip content={<CustomTooltip />} />
-          <Legend
-            verticalAlign="top"
-            align="right"
-            wrapperStyle={{ fontSize: 12, paddingBottom: 8 }}
-          />
           <Line
             type="monotone"
             dataKey="complex"
             stroke="#006FBD"
             strokeWidth={2.5}
             dot={{ r: 4, fill: '#006FBD' }}
-            name={data.complex_name}
+            name={`${data.complex_name} 평단가`}
           />
           <Line
             type="monotone"
@@ -74,7 +78,7 @@ export default function PricePerPyeongChart({ data }: PricePerPyeongChartProps) 
             stroke="#FF8C00"
             strokeWidth={2}
             dot={{ r: 4, fill: '#FF8C00' }}
-            name={data.dong_name}
+            name={`${data.dong_name} 평균`}
           />
           <Line
             type="monotone"
@@ -82,7 +86,7 @@ export default function PricePerPyeongChart({ data }: PricePerPyeongChartProps) 
             stroke="#20c997"
             strokeWidth={2}
             dot={{ r: 4, fill: '#20c997' }}
-            name={data.sigungu_name}
+            name={`${data.sigungu_name} 평균`}
           />
         </LineChart>
       </ResponsiveContainer>

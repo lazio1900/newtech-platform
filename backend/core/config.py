@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 60
     llm_daily_call_limit: int = 1000
 
+    # ----- 등기부등본 API (별도 마이크로서비스, 8100 포트) -----
+    registry_api_url: str = "http://localhost:8100"
+    registry_internal_token: Optional[str] = None
+    registry_request_timeout: int = 60
+
     # ----- Logging / Observability -----
     log_level: str = "INFO"
     log_format: str = "json"

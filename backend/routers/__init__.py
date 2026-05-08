@@ -6,6 +6,7 @@ from routers import (
     complexes,
     health,
     monitoring,
+    registry,
     suggestions,
 )
 
@@ -16,5 +17,6 @@ __all__ = [
     "complexes",
     "health",
     "monitoring",
+    "registry",
     "suggestions",
 ]

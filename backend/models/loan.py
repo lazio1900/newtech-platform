@@ -88,6 +88,24 @@ class LoanApplication(Base):
     )
     memo = Column(Text, nullable=True)
 
+    # AI 입지 분석 캐시 (LLM 응답) — 한 번 생성되면 재사용. NULL 이면 재생성 trigger
+    ai_analysis_text = Column(Text, nullable=True, comment="LLM 입지 분석 결과(상세보기)")
+    ai_analysis_generated_at = Column(DateTime, nullable=True)
+    # AI 시세 분석 캐시
+    ai_market_text = Column(Text, nullable=True, comment="LLM 시세 분석 결과(상세보기)")
+    ai_market_generated_at = Column(DateTime, nullable=True)
+    # AI 유사물건 분석 캐시
+    ai_nearby_text = Column(Text, nullable=True, comment="LLM 유사물건 종합 코멘트")
+    ai_nearby_generated_at = Column(DateTime, nullable=True)
+    # 등기부등본 발급 결과 ic_id (registry_request 테이블 참조값, FK 미설정 — 별도 마이크로서비스)
+    registry_ic_id = Column(Integer, nullable=True, index=True)
+    # AI 권리 분석 캐시 (LLM 응답 — 좌측 요약 + 우측 줄글 통합 JSON)
+    ai_rights_text = Column(Text, nullable=True, comment="LLM 권리 분석 (요약 + 줄글) JSON")
+    ai_rights_generated_at = Column(DateTime, nullable=True)
+    # AI 종합 의견 + 심사역 권고 캐시
+    ai_overall_text = Column(Text, nullable=True, comment="LLM 종합 의견 + 심사역 권고 JSON")
+    ai_overall_generated_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     decided_at = Column(DateTime, nullable=True, comment="승인/반려 확정 시각")
@@ -122,6 +140,7 @@ class LoanApplication(Base):
             "pyeong": self.pyeong,
             "dong": self.dong,
             "ho": self.ho,
+            "registry_ic_id": self.registry_ic_id,
             # FE 호환: status는 한글 라벨로 노출. status_value는 enum 값.
             "status": status_label,
             "status_value": status_value,

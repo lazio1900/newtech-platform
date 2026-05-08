@@ -14,7 +14,7 @@ export default function CreditSources({ data }: CreditSourcesProps) {
   return (
     <div className="credit-sources">
       <div className="credit-box">
-        <h4>KB 시세 (추정가) 크레딧</h4>
+        <h4>최신 KB 시세</h4>
         <div className="credit-content">
           <div className="price-info">
             <span className="main-price">{formatPrice(data.kb_price.estimated)}</span>
@@ -27,7 +27,7 @@ export default function CreditSources({ data }: CreditSourcesProps) {
       </div>
 
       <div className="credit-box">
-        <h4>국토교통부 실거래가 크레딧</h4>
+        <h4>최신 실거래가</h4>
         <div className="credit-content">
           <div className="price-info">
             <span className="main-price">{formatPrice(data.molit_transactions.recent_price)}</span>
@@ -38,7 +38,7 @@ export default function CreditSources({ data }: CreditSourcesProps) {
       </div>
 
       <div className="credit-box">
-        <h4>네이버페이 부동산 매매호가 크레딧</h4>
+        <h4>최신 부동산 매매호가</h4>
         <div className="credit-content">
           <div className="price-info">
             <span className="main-price">{formatPrice(data.naver_listings.avg_asking)}</span>

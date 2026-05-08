@@ -32,4 +32,5 @@ def analyze(
         complex_id=request.complex_id,
         area_id=request.area_id,
         complex_name=request.complex_name,
+        application_id=request.application_id,
     )

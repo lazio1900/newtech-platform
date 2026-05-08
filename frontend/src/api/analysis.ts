@@ -6,6 +6,7 @@ interface AnalyzeOptions {
   areaId?: number | null;
   complexName?: string | null;
   pyeong?: number | null;
+  applicationId?: string | null;
 }
 
 export const analyzeProperty = async (
@@ -22,6 +23,7 @@ export const analyzeProperty = async (
     area_id: options.areaId ?? null,
     complex_name: options.complexName ?? null,
     pyeong: options.pyeong ?? null,
+    application_id: options.applicationId ?? null,
   });
   return data.data;
 };
