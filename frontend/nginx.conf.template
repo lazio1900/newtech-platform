@@ -23,7 +23,9 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 60s;
+        # 등기부 4-step chain(최대 ~240s) + 분석 콜드캐시(MinerU+LLM, 90s+) 여유.
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
     }
 
     # 정적 자산 캐싱

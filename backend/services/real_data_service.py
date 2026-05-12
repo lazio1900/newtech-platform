@@ -519,9 +519,14 @@ def build_real_nearby_trends(
 ) -> Optional[NearbyPropertyTrends]:
     """반경 + 평형 매칭 + 유사도 점수 기반 인근 유사 물건 산출.
 
-    1) 타겟 lat/lng 기준 1km 반경, 부족하면 2km
-    2) 평형 ±5㎡ 우선, 부족하면 ±10㎡
-    3) 유사도 = 거리(40%) + 평형차(30%) + 연식차(20%) + 세대수차(10%)
+    1) 타겟 lat/lng 기준 단계적 반경/평형 확장으로 후보 모음
+    2) 후보별 최근 거래가 사전 조회 (가격 유사도 점수에 필요)
+    3) 유사도 점수 (5요소):
+         - 거리 30% (0m=1.0, 2km=0.0)
+         - 평형 25% (±0=1.0, ±15㎡=0.0)
+         - 가격 25% (±0%=1.0, ±50%=0.0; 타겟 가격 미상이면 모든 후보 0.5 중립)
+         - 년식 15% (±0=1.0, ±20년=0.0)
+         - 세대수 5% (min/max 비율)
     4) 점수 상위 max_count 건
     5) 가격차 % = (유사 - 타겟) / 타겟
     """
@@ -596,39 +601,9 @@ def build_real_nearby_trends(
     if not candidates:
         return None
 
-    # 유사도 점수 산출
-    def score(c: Complex, a: Area, d: int) -> float:
-        # 거리 (40%): 0m=1.0, 2km=0.0
-        s_d = max(0.0, 1.0 - d / 2000.0)
-        # 평형차 (30%): ±0=1.0, ±15m²=0.0
-        s_a = 1.0
-        if target_m2 and a.exclusive_m2:
-            s_a = max(0.0, 1.0 - abs(a.exclusive_m2 - target_m2) / 15.0)
-        # 연식차 (20%): ±0=1.0, ±20년=0.0
-        s_y = 1.0
-        if target_age is not None and c.built_year:
-            try:
-                c_age = today.year - int(str(c.built_year)[:4])
-                s_y = max(0.0, 1.0 - abs(c_age - target_age) / 20.0)
-            except (ValueError, TypeError):
-                pass
-        # 세대수차 (10%): 비율 가까울수록
-        s_u = 1.0
-        if target_units > 0 and c.total_households:
-            ratio = min(target_units, c.total_households) / max(target_units, c.total_households)
-            s_u = ratio
-        return round(s_d * 0.4 + s_a * 0.3 + s_y * 0.2 + s_u * 0.1, 3)
-
-    scored: list[tuple[Complex, Area, int, float]] = []
+    # 후보별 최근/오래된 거래 사전 조회 (가격 유사도 점수 + 결과 빌드 양쪽에 사용)
+    enriched: list[tuple[Complex, Area, int, Transaction, Optional[Transaction]]] = []
     for c, a, d in candidates:
-        scored.append((c, a, d, score(c, a, d)))
-    scored.sort(key=lambda x: x[3], reverse=True)
-    scored = scored[:max_count]
-
-    similar_properties: List[SimilarProperty] = []
-    change_rates: list[float] = []
-    for c, a, d, sim in scored:
-        # 평형 매칭된 거래만으로 최근가 + 3개월 변동
         m2_lo = (a.exclusive_m2 or 0) - 5.0
         m2_hi = (a.exclusive_m2 or 0) + 5.0
         recent_txn = (
@@ -642,7 +617,6 @@ def build_real_nearby_trends(
             .first()
         )
         if not recent_txn:
-            # 평형 매칭 거래 없으면 전체 fallback
             recent_txn = (
                 db.query(Transaction)
                 .filter(Transaction.complex_id == c.id, Transaction.is_cancelled == False)
@@ -650,7 +624,7 @@ def build_real_nearby_trends(
                 .first()
             )
         if not recent_txn:
-            continue
+            continue  # 가격 정보 자체 없음 → 후보에서 제외
         oldest_txn = (
             db.query(Transaction)
             .filter(
@@ -662,6 +636,49 @@ def build_real_nearby_trends(
             .order_by(Transaction.contract_date.asc())
             .first()
         )
+        enriched.append((c, a, d, recent_txn, oldest_txn))
+
+    if not enriched:
+        return None
+
+    # 5요소 유사도 점수
+    def score(c: Complex, a: Area, d: int, recent_txn: Transaction) -> float:
+        # 거리 30% (0m=1.0, 2km=0.0)
+        s_d = max(0.0, 1.0 - d / 2000.0)
+        # 평형 25% (±0=1.0, ±15㎡=0.0)
+        s_a = 1.0
+        if target_m2 and a.exclusive_m2:
+            s_a = max(0.0, 1.0 - abs(a.exclusive_m2 - target_m2) / 15.0)
+        # 가격 25% (±0%=1.0, ±50%=0.0). 타겟 가격 미상이면 0.5 중립
+        if target_recent_price and target_recent_price > 0:
+            diff_ratio = abs(recent_txn.price - target_recent_price) / target_recent_price
+            s_p = max(0.0, 1.0 - diff_ratio / 0.50)
+        else:
+            s_p = 0.5
+        # 년식 15% (±0=1.0, ±20년=0.0)
+        s_y = 1.0
+        if target_age is not None and c.built_year:
+            try:
+                c_age = today.year - int(str(c.built_year)[:4])
+                s_y = max(0.0, 1.0 - abs(c_age - target_age) / 20.0)
+            except (ValueError, TypeError):
+                pass
+        # 세대수 5% (min/max 비율)
+        s_u = 1.0
+        if target_units > 0 and c.total_households:
+            ratio = min(target_units, c.total_households) / max(target_units, c.total_households)
+            s_u = ratio
+        return round(s_d * 0.30 + s_a * 0.25 + s_p * 0.25 + s_y * 0.15 + s_u * 0.05, 3)
+
+    scored: list[tuple[Complex, Area, int, Transaction, Optional[Transaction], float]] = []
+    for c, a, d, recent_txn, oldest_txn in enriched:
+        scored.append((c, a, d, recent_txn, oldest_txn, score(c, a, d, recent_txn)))
+    scored.sort(key=lambda x: x[5], reverse=True)
+    scored = scored[:max_count]
+
+    similar_properties: List[SimilarProperty] = []
+    change_rates: list[float] = []
+    for c, a, d, recent_txn, oldest_txn, sim in scored:
         price_change_rate = 0.0
         if oldest_txn and oldest_txn.price > 0 and oldest_txn.id != recent_txn.id:
             price_change_rate = round((recent_txn.price - oldest_txn.price) / oldest_txn.price, 3)

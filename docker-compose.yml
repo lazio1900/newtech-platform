@@ -29,6 +29,16 @@ services:
       timeout: 3s
       retries: 5
 
+  mineru-api:
+    build:
+      context: ./mineru-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${MINERU_PORT:-8200}:8000"
+    volumes:
+      - mineru_models:/models
+
   backend:
     build:
       context: ./backend
@@ -40,6 +50,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-kb_user}:${POSTGRES_PASSWORD:-kb_password}@postgres:5432/${POSTGRES_DB:-kb_estate}
       REDIS_URL: redis://redis:6379/0
+      MINERU_API_URL: http://mineru-api:8000
     ports:
       - "${BACKEND_PORT:-8002}:8002"
     depends_on:
@@ -47,6 +58,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mineru-api:
+        condition: service_started
 
   frontend:
     build:
@@ -55,6 +68,9 @@ services:
       args:
         # 빈 값 → 빌드 산출물에 상대 URL 사용 → nginx가 /api를 backend로 프록시
         VITE_API_BASE_URL: ""
+        # 지도 타일. 운영망: OSM. 폐쇄망 이관 시 빈 값으로 두면 점만 표시.
+        VITE_MAP_TILE_URL: "${VITE_MAP_TILE_URL:-https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png}"
+        VITE_MAP_TILE_ATTRIBUTION: "${VITE_MAP_TILE_ATTRIBUTION:-&copy; OpenStreetMap}"
     restart: unless-stopped
     environment:
       BACKEND_HOST: backend
@@ -67,3 +83,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  mineru_models:

@@ -61,8 +61,8 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
     setRegistryLoading(true);
     setRegistryResult(null);
     try {
-      // 단지명을 주소에 포함시켜 인터넷등기소 매칭률 ↑
-      // (HANDOFF.md 기준: '도로명 + 단지명 + 동/호' 조합 권장)
+      // backend 가 complex_id 기반으로 4단계 후보 chain (지번/도로명 × 단지명 유무) 으로 매칭 시도.
+      // payload.address 는 후보가 못 만들어진 예외 경로의 fallback 용도.
       const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
       const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
 
@@ -71,6 +71,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
         dong: dong.trim(),
         ho: ho.trim(),
         type: '집합건물',
+        complex_id: selectedComplex.id,
       });
 
       // 즉시 완료된 경우 (캐시 hit 등)
@@ -95,7 +96,8 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
 
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
       let elapsed = 0;
-      while (elapsed < 60_000) {
+      // 등기부 API 의 PDF 다운로드 폴링이 최대 120초. 여유 두고 180초.
+      while (elapsed < 180_000) {
         await sleep(5000);
         elapsed += 5000;
         try {
@@ -122,7 +124,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
       }
       setRegistryResult({
         status: 'timeout', ic_id: icId,
-        error: '발급이 1분 안에 완료되지 않았습니다. 잠시 후 다시 확인해주세요.',
+        error: '발급이 3분 안에 완료되지 않았습니다. 잠시 후 다시 확인해주세요.',
       });
     } catch (e: any) {
       setRegistryResult({
@@ -302,12 +304,18 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
     ].filter(Boolean).join(' ');
   };
 
+  // 사용자는 숫자만 입력 ('102'). 표시·저장 시 '동'/'호' 접미사 부여.
+  const formatDongHo = (d: string | null | undefined, h: string | null | undefined): string => {
+    const parts: string[] = [];
+    if (d && String(d).trim()) parts.push(`${String(d).trim()}동`);
+    if (h && String(h).trim()) parts.push(`${String(h).trim()}호`);
+    return parts.join(' ');
+  };
+
   // property_address 는 단지 주소 + 동/호 합쳐서 저장 (화면 표시 시 한 줄로 보이도록)
   const buildFullAddress = (): string => {
-    const parts = [baseComplexAddress()];
-    if (dong.trim()) parts.push(dong.trim());
-    if (ho.trim()) parts.push(ho.trim());
-    return parts.filter(Boolean).join(' ');
+    const dongHo = formatDongHo(dong, ho);
+    return [baseComplexAddress(), dongHo].filter(Boolean).join(' ');
   };
 
   const handleSubmit = async () => {
@@ -585,11 +593,37 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
               {/* 단지 선택 후 표시 영역 */}
               {selectedComplex && (
                 <>
-                  {/* 주소 (readonly) — 동/호 입력하면 자동으로 합쳐져 표시 */}
-                  <div className="apply-field">
-                    <label>주소</label>
-                    <input type="text" value={buildFullAddress()} disabled readOnly />
-                  </div>
+                  {/* 도로명 주소 (readonly) — 동/호 입력하면 자동으로 합쳐져 표시 */}
+                  {selectedComplex.road_address && (
+                    <div className="apply-field">
+                      <label>도로명 주소</label>
+                      <input
+                        type="text"
+                        value={[selectedComplex.road_address, selectedComplex.name, formatDongHo(dong, ho)].filter(Boolean).join(' ')}
+                        disabled readOnly
+                      />
+                    </div>
+                  )}
+
+                  {/* 지번 주소 (readonly) */}
+                  {selectedComplex.address && (
+                    <div className="apply-field">
+                      <label>지번 주소</label>
+                      <input
+                        type="text"
+                        value={[selectedComplex.address, selectedComplex.name, formatDongHo(dong, ho)].filter(Boolean).join(' ')}
+                        disabled readOnly
+                      />
+                    </div>
+                  )}
+
+                  {/* 도로명·지번 모두 없는 예외 케이스: 조합 주소 fallback */}
+                  {!selectedComplex.road_address && !selectedComplex.address && (
+                    <div className="apply-field">
+                      <label>주소</label>
+                      <input type="text" value={buildFullAddress()} disabled readOnly />
+                    </div>
+                  )}
 
                   {/* 평형 — DB에 등록된 areas 중에서만 선택 */}
                   <div className="apply-field">
@@ -635,12 +669,13 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                     <div className="dong-ho-row">
                       <input type="text" value={dong}
                              onChange={(e) => setDong(e.target.value)}
-                             placeholder="예: 3동" disabled={submitting} />
+                             placeholder="예: 3" disabled={submitting} />
                       <input type="text" value={ho}
                              onChange={(e) => setHo(e.target.value)}
-                             placeholder="예: 502호" disabled={submitting} />
+                             placeholder="예: 502" disabled={submitting} />
                     </div>
                   </div>
+
 
                   {/* 등기부등본 가져오기 */}
                   <div className="apply-field" style={{ marginTop: 12 }}>
@@ -662,6 +697,13 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                     >
                       {registryLoading ? '발급 요청 중...' : '📄 등기부등본 가져오기'}
                     </button>
+                    {registryLoading && (
+                      <div style={{
+                        marginTop: 6, fontSize: 12, color: '#6B7785', textAlign: 'center',
+                      }}>
+                        등기부등본 조회에 시간이 소요될 수 있습니다.
+                      </div>
+                    )}
                     {registryResult && (
                       <div style={{
                         marginTop: 8, padding: 10, borderRadius: 4,
@@ -774,7 +816,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                         )}
                         {(app.dong || app.ho) && (
                           <div className="cell-secondary">
-                            {[app.dong, app.ho].filter(Boolean).join(' ')}
+                            {formatDongHo(app.dong, app.ho)}
                           </div>
                         )}
                       </td>

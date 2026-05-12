@@ -15,7 +15,6 @@ from services.dummy_data import (
     generate_property_rights_info,
     generate_credit_data,
     generate_location_scores,
-    generate_nearby_property_trends,
     generate_price_per_pyeong_trend
 )
 from services.real_data_service import get_real_market_data
@@ -184,12 +183,8 @@ def perform_full_analysis(
             pyeong=target_pyeong,
         )
 
-    # 1-2. 인근 유사 물건지 동향: 실 데이터 우선
-    nearby_trends = (
-        real_data["nearby_trends"]
-        if real_data and real_data.get("nearby_trends")
-        else generate_nearby_property_trends(property_address, property_basic_info)
-    )
+    # 1-2. 인근 유사 물건지 동향: 실 수집 데이터만 사용. 없으면 None (frontend 에서 자동 숨김).
+    nearby_trends = real_data["nearby_trends"] if real_data and real_data.get("nearby_trends") else None
 
     # 1-3. 평단가 추이: 실 데이터 우선
     price_per_pyeong = (
@@ -212,7 +207,7 @@ def perform_full_analysis(
 
     # 유사물건 평균 변동률
     avg_change = 0
-    if nearby_trends.similar_properties:
+    if nearby_trends and nearby_trends.similar_properties:
         avg_change = round(
             sum(p.price_change_rate for p in nearby_trends.similar_properties)
             / len(nearby_trends.similar_properties) * 100, 1
@@ -252,60 +247,65 @@ def perform_full_analysis(
         f"[LTV] 현재 LTV {ltv_current}%, JB LTV {ltv_jb}%."
     )
 
-    # 3. AI 입지 분석 — 실 facility 데이터 있으면 LLM, 없으면 더미
+    # 3. AI 입지/시세/유사물건 분석을 병렬 실행 (서로 독립).
+    #    rights 는 위에서 이미 실행됨 — total_prior 가 그 결과에 의존하기 때문에 serial 유지.
     property_analysis_text = None
-    if real_data and real_data.get("complex") and db is not None:
-        try:
-            from services.ai_property_analysis_service import generate_or_get_cached
-            property_analysis_text = generate_or_get_cached(
-                db=db,
-                application_id=application_id,
-                complex_obj=real_data["complex"],
-                scores=location_scores,
-                pyeong=target_pyeong,
-            )
-        except Exception as e:
-            logger.warning(f"AI 입지 분석 호출 실패, 더미 폴백: {e}")
+    market_analysis_text = None
+    nearby_analysis_text = None
+
+    parallel_tasks = {}
+    target_name = real_data["complex"].name if (real_data and real_data.get("complex")) else (complex_name or "")
+    complex_id_for_threads = real_data["complex"].id if (real_data and real_data.get("complex")) else None
+
+    if complex_id_for_threads is not None:
+        def _property(local_db, _cid=complex_id_for_threads, _scores=location_scores, _py=target_pyeong):
+            from models.complex import Complex
+            from services.ai_property_analysis_service import generate_or_get_cached as gp
+            co = local_db.query(Complex).filter(Complex.id == _cid).first()
+            return gp(db=local_db, application_id=application_id, complex_obj=co, scores=_scores, pyeong=_py)
+        parallel_tasks["property"] = _property
+
+    if real_data and real_data.get("credit_data"):
+        def _market(local_db, _credit=credit_data, _nb=nearby_trends, _amt=loan_amount, _tp=total_prior, _py=target_pyeong):
+            from services.ai_market_analysis_service import generate_or_get_cached as gm
+            return gm(db=local_db, application_id=application_id,
+                      credit=_credit, nearby=_nb, loan_amount=_amt, total_prior=_tp, pyeong=_py)
+        parallel_tasks["market"] = _market
+
+    if real_data and nearby_trends and nearby_trends.similar_properties:
+        # 타겟 메타 — LLM 환각 방지차 prompt 에 명시 전달
+        target_complex = real_data.get("complex")
+        target_age: Optional[int] = None
+        target_units: Optional[int] = None
+        if target_complex:
+            target_units = target_complex.total_households
+            if target_complex.built_year:
+                try:
+                    target_age = date.today().year - int(str(target_complex.built_year)[:4])
+                except (ValueError, TypeError):
+                    pass
+
+        def _nearby(local_db, _name=target_name, _nb=nearby_trends, _ppp=price_per_pyeong,
+                    _py=target_pyeong, _age=target_age, _units=target_units):
+            from services.ai_nearby_analysis_service import generate_or_get_cached as gn
+            return gn(db=local_db, application_id=application_id,
+                      target_complex_name=_name, target_recent_price=_nb.target_recent_price,
+                      nearby=_nb, ppp=_ppp,
+                      target_pyeong=_py, target_age=_age, target_units=_units)
+        parallel_tasks["nearby"] = _nearby
+
+    if parallel_tasks:
+        from utils.parallel import run_with_session
+        results = run_with_session(parallel_tasks)
+        property_analysis_text = results.get("property")
+        market_analysis_text = results.get("market")
+        nearby_analysis_text = results.get("nearby")
+
     if not property_analysis_text:
         property_analysis_text = (
             f"[입지 분석] {property_address} 단지에 대해 현재 자동 분석 결과를 생성할 수 없습니다. "
             "단지 좌표와 주변 시설 데이터(학군/지하철/병원/공원)가 수집된 후 다시 시도해주세요."
         )
-
-    # 3-2. AI 시세 분석 — 실 시세 데이터 있으면 LLM, 없으면 더미
-    market_analysis_text = None
-    if real_data and real_data.get("credit_data") and db is not None:
-        try:
-            from services.ai_market_analysis_service import generate_or_get_cached as gen_market
-            market_analysis_text = gen_market(
-                db=db,
-                application_id=application_id,
-                credit=credit_data,
-                nearby=nearby_trends,
-                loan_amount=loan_amount,
-                total_prior=total_prior,
-                pyeong=target_pyeong,
-            )
-        except Exception as e:
-            logger.warning(f"AI 시세 분석 호출 실패, 더미 폴백: {e}")
-
-    # 3-3. AI 유사물건 종합 코멘트 — 인근 + 평단가 통합
-    nearby_analysis_text = None
-    if real_data and nearby_trends and nearby_trends.similar_properties and db is not None:
-        try:
-            from services.ai_nearby_analysis_service import generate_or_get_cached as gen_nearby
-            target_recent_price = nearby_trends.target_recent_price
-            target_name = real_data["complex"].name if real_data.get("complex") else (complex_name or "")
-            nearby_analysis_text = gen_nearby(
-                db=db,
-                application_id=application_id,
-                target_complex_name=target_name,
-                target_recent_price=target_recent_price,
-                nearby=nearby_trends,
-                ppp=price_per_pyeong,
-            )
-        except Exception as e:
-            logger.warning(f"AI 유사물건 분석 호출 실패: {e}")
 
     # 3-4. AI 종합 의견 + 심사역 권고 — 모든 분석 사실 종합 LLM
     overall_opinion = comprehensive_opinion_fallback

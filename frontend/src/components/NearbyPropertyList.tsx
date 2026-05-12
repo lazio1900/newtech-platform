@@ -5,7 +5,16 @@ interface NearbyPropertyListProps {
 }
 
 export default function NearbyPropertyList({ data }: NearbyPropertyListProps) {
-  if (!data || data.similar_properties.length === 0) return null;
+  if (!data || data.similar_properties.length === 0) {
+    return (
+      <div className="info-card">
+        <h3>유사 물건 목록</h3>
+        <div style={{ padding: '24px 16px', textAlign: 'center', color: '#888', fontSize: 13 }}>
+          유사 단지로 매칭된 거래 데이터가 없습니다.
+        </div>
+      </div>
+    );
+  }
 
   const formatPrice = (value: number): string => {
     const eok = value / 100000000;

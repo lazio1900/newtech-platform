@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# Linters / formatters / type checker (harness lint hook 이 호출)
+ruff==0.1.14
+black==24.1.1
+mypy==1.8.0

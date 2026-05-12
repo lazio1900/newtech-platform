@@ -506,4 +506,5 @@
   font-size: 12px;
   font-weight: 600;
   color: #FFFFFF;
+  white-space: nowrap;
 }

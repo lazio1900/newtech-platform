@@ -13,6 +13,12 @@ COPY . .
 ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
+# 유사물건 지도 타일 — 폐쇄망 빌드 시 둘 다 비우면 점만 렌더.
+ARG VITE_MAP_TILE_URL=https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png
+ARG VITE_MAP_TILE_ATTRIBUTION=&copy; OpenStreetMap
+ENV VITE_MAP_TILE_URL=${VITE_MAP_TILE_URL}
+ENV VITE_MAP_TILE_ATTRIBUTION=${VITE_MAP_TILE_ATTRIBUTION}
+
 RUN npm run build
 
 

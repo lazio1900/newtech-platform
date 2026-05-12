@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # ----- JWT (Phase 1b에서 사용) -----
     jwt_secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 60
+    jwt_access_token_expire_minutes: int = 480  # 8h — 한 근무일 (ADR-005)
 
     # ----- LLM / OpenAI (Phase 3에서 사용) -----
     openai_api_key: Optional[str] = None
@@ -45,7 +45,11 @@ class Settings(BaseSettings):
     # ----- 등기부등본 API (별도 마이크로서비스, 8100 포트) -----
     registry_api_url: str = "http://localhost:8100"
     registry_internal_token: Optional[str] = None
-    registry_request_timeout: int = 60
+    registry_request_timeout: int = 120
+
+    # ----- MinerU API (PDF→markdown 사이드카, 8200 포트) -----
+    mineru_api_url: str = "http://localhost:8200"
+    mineru_request_timeout: int = 300
 
     # ----- Logging / Observability -----
     log_level: str = "INFO"

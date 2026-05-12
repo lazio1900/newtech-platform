@@ -51,6 +51,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
   const [applications, setApplications] = useState<LoanApplication[]>([]);
   const [selectedApp, setSelectedApp] = useState<LoanApplication | null>(null);
   const [appAnalysisData, setAppAnalysisData] = useState<AnalysisResponse | null>(null);
+  const [appAnalysisError, setAppAnalysisError] = useState<string | null>(null);
   const [appLoading, setAppLoading] = useState<boolean>(false);
   const [showAppRegistryModal, setShowAppRegistryModal] = useState<boolean>(false);
 
@@ -104,6 +105,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
     setSelectedApp(app);
     setAppLoading(true);
     setAppAnalysisData(null);
+    setAppAnalysisError(null);
     try {
       const response = await analyzeProperty(
         app.company_name,
@@ -120,6 +122,13 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
       setAppAnalysisData(response);
     } catch (err) {
       console.error('Analysis error:', err);
+      const e = err as { code?: string; message?: string; response?: { data?: { detail?: string } } };
+      const isTimeout = e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message || '');
+      setAppAnalysisError(
+        isTimeout
+          ? '분석에 시간이 오래 걸려 응답을 받지 못했습니다. 잠시 후 다시 시도해주세요.'
+          : (e?.response?.data?.detail || e?.message || '분석 요청에 실패했습니다.')
+      );
     } finally {
       setAppLoading(false);
     }
@@ -929,6 +938,7 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                         <th>신청번호</th>
                         <th>대부업체명</th>
                         <th>대표이사</th>
+                        <th>단지명</th>
                         <th>담보물건 주소</th>
                         <th>신청금액</th>
                         <th>금리</th>
@@ -944,6 +954,7 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                           <td>{app.id}</td>
                           <td>{app.company_name}</td>
                           <td>{app.ceo_name}</td>
+                          <td>{app.complex_name || '-'}</td>
                           <td className="address-cell">{app.property_address}</td>
                           <td>{formatAmount(app.loan_amount)}</td>
                           <td>7.5%</td>
@@ -1043,6 +1054,28 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                   appAnalysisData, showAppRegistryModal, setShowAppRegistryModal,
                   selectedApp.loan_amount, 7.5, selectedApp.loan_duration,
                   selectedApp.registry_ic_id ?? null,
+                )}
+
+                {!appLoading && !appAnalysisData && appAnalysisError && (
+                  <div style={{
+                    padding: 24, margin: '16px 0',
+                    background: '#FEE2E2', borderRadius: 8,
+                    color: '#991B1B', fontSize: 14, lineHeight: 1.6,
+                  }}>
+                    <strong style={{ display: 'block', marginBottom: 6 }}>분석 실패</strong>
+                    {appAnalysisError}
+                    <button
+                      type="button"
+                      onClick={() => handleAppAnalyze(selectedApp)}
+                      style={{
+                        marginTop: 12, padding: '6px 14px', fontSize: 13, fontWeight: 600,
+                        color: '#fff', background: '#991B1B', border: 'none',
+                        borderRadius: 4, cursor: 'pointer',
+                      }}
+                    >
+                      다시 시도
+                    </button>
+                  </div>
                 )}
               </div>
             )}

@@ -15,6 +15,7 @@ export const analyzeProperty = async (
   loanAmount: number,
   options: AnalyzeOptions = {},
 ): Promise<AnalysisResponse> => {
+  // 콜드 캐시 시 LLM 5개 + MinerU 초기화로 30s 넘을 수 있음. nginx proxy_read_timeout(120s) 범위 내.
   const { data } = await apiClient.post('/api/analyze', {
     company_name: companyName,
     property_address: address,
@@ -24,7 +25,7 @@ export const analyzeProperty = async (
     complex_name: options.complexName ?? null,
     pyeong: options.pyeong ?? null,
     application_id: options.applicationId ?? null,
-  });
+  }, { timeout: 180_000 });
   return data.data;
 };
 

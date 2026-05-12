@@ -5,6 +5,7 @@ export interface RegistryRequestIn {
   dong?: string | null;
   ho?: string | null;
   type?: string;        // 등기부등본 타입 (예: 토지/건물/집합)
+  complex_id?: number | null;  // backend 가 지번/도로명 후보 chain 구성용
   force_refresh?: boolean;
 }
 
@@ -24,9 +25,12 @@ export interface RegistryRequestOut {
  */
 export const registryApi = {
   request: async (payload: RegistryRequestIn): Promise<RegistryRequestOut> => {
+    // backend 가 최대 4단계 chain (지번/도로명 × 단지명 유무) 으로 IROS 매칭 시도.
+    // 각 단계가 30s+ 걸릴 수 있어 합계는 그 이상. nginx proxy_read_timeout 도 동일하게 ↑.
     const { data } = await apiClient.post<RegistryRequestOut>(
       '/api/registry/request',
       payload,
+      { timeout: 240_000 },
     );
     return data;
   },

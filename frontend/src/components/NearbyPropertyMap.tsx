@@ -9,7 +9,16 @@ interface NearbyPropertyMapProps {
 }
 
 export default function NearbyPropertyMap({ data, targetAddress }: NearbyPropertyMapProps) {
-  if (!data) return null;
+  if (!data || data.similar_properties.length === 0) {
+    return (
+      <div className="info-card">
+        <h3>인근 유사 물건지 동향</h3>
+        <div style={{ padding: '40px 16px', textAlign: 'center', color: '#888', fontSize: 13 }}>
+          해당 지역의 유사 단지 수집 데이터가 없습니다.
+        </div>
+      </div>
+    );
+  }
 
   const formatPrice = (value: number): string => `${(value / 100000000).toFixed(1)}억`;
   const formatRate = (rate: number): string => {
@@ -19,15 +28,22 @@ export default function NearbyPropertyMap({ data, targetAddress }: NearbyPropert
 
   const center: [number, number] = [data.target_lat, data.target_lng];
 
+  // 폐쇄망 빌드 시 VITE_MAP_TILE_URL 을 빈 값으로 두면 외부 타일 호출 안 함 (점만 렌더).
+  // 운영망: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png' 같은 URL 지정.
+  const tileUrl = import.meta.env.VITE_MAP_TILE_URL || '';
+  const tileAttribution = import.meta.env.VITE_MAP_TILE_ATTRIBUTION || '';
+
   return (
     <div className="info-card">
       <h3>인근 유사 물건지 동향</h3>
-      <div className="nearby-map-container" style={{ height: '360px', borderRadius: '8px', overflow: 'hidden' }}>
+      <div className="nearby-map-container" style={{
+        height: '360px', borderRadius: '8px', overflow: 'hidden',
+        background: tileUrl ? undefined : '#F3F4F6',
+      }}>
         <MapContainer center={center} zoom={14} style={{ height: '100%', width: '100%' }} scrollWheelZoom={false}>
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
+          {tileUrl && (
+            <TileLayer attribution={tileAttribution} url={tileUrl} />
+          )}
           {/* 대상 물건 - 빨간 점 */}
           <CircleMarker
             center={center}
