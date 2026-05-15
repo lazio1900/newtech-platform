@@ -30,10 +30,19 @@ JSON 키:
     {"name": "이OO", "reg_number": "*-*-*", "share": "1/1", "address": "서울특별시...", "rank_number": 1}
 - "ownership_other_entries": 갑구 소유권 외 사항 array (가압류/가처분/경매개시 등). 각 항목은
     {"rank_number": 1, "purpose": "가압류", "receipt_info": "2024년...", "details": "..."}
-- "mortgage_entries": 을구 (근)저당권/전세권 array. 각 항목은
+- "mortgage_entries": 을구 (근)저당권/전세권/근질권 array. 각 항목은
     {"rank_number": "1-1", "purpose": "근저당권설정", "receipt_info": "2024년1월15일\n제12345호", "main_details": "채권최고액 금500,000,000원\n채무자 이OO\n근저당권자 KB국민은행", "target_owner": "이OO"}
     - target_owner 는 해당 근저당이 설정된 소유자 이름. 등기부의 "대상소유자" 또는 채무자(소유자와 동일한 경우) 에서 추출.
-- "max_bond_amount": 선순위 채권최고액 합계 (원, 정수). 모든 활성 근저당의 채권최고액 합산
+    - purpose 는 등기부 원문 표기 그대로: "근저당권설정" / "근저당권변경" / "근저당권이전" / "근질권설정" / "전세권설정" 등. 임의로 통일하지 말 것.
+- "max_bond_amount": 선순위 채권최고액 합계 (원, 정수).
+    **계산 규칙 — 매우 중요. "채권최고액"이 적힌 모든 항목을 무조건 더하지 말 것.**
+    1) 합산 대상: purpose 가 "근저당권설정" 인 활성 항목의 채권최고액만.
+    2) 합산 제외:
+       - "근질권설정" (제3채권자가 근저당권자의 채권에 대해 갖는 권리 — 동일 근저당 위에 얹힌 권리이므로 이미 (1) 에 포함된 부담을 이중계상하면 안 됨)
+       - "근저당권이전" (같은 근저당의 채권자 변경 — 부담 총액 불변)
+       - "근저당권변경" (같은 순위 근저당의 채무자·채권최고액 등 변경)
+    3) "근저당권변경" 으로 채권최고액이 갱신된 경우: 동일 순위(rank_number 의 주 번호; "1-2" → "1") 에 속한 가장 최신 변경의 채권최고액으로 그 근저당의 금액을 **덮어쓴 뒤** 합산. 원래 설정액과 변경액을 둘 다 더하지 말 것.
+    4) 요약 페이지가 "을구 - 기록사항 없음" 이면 0.
 - "tenant_deposit": 선순위 임차보증금 (원, 정수). 등기부에 있으면, 없으면 0
 - "gap_summary":  갑구 소유권/이전이력 자연어 요약 2~3문장
 - "eul_summary":  을구 (근)저당/전세권 자연어 요약 2~3문장
@@ -88,6 +97,27 @@ def _fetch_pdf_blob(ic_id: int) -> Optional[bytes]:
         return r.content
     except Exception as e:
         logger.warning(f"[ai_rights] PDF fetch {ic_id} failed: {e}")
+        return None
+
+
+def _fetch_cached_markdown(ic_id: int) -> Optional[str]:
+    """등기부 API 가 PDF 발급 시 함께 저장한 MinerU markdown 을 받아온다.
+
+    캐시 hit 이면 MinerU 재호출 회피 (속도·비용 절감). 미생성/404 이면 None.
+    """
+    if not settings.registry_internal_token:
+        return None
+    try:
+        with httpx.Client(timeout=10) as client:
+            r = client.get(
+                f"{settings.registry_api_url}/v1/registry/{ic_id}/markdown",
+                headers={"X-Internal-Token": settings.registry_internal_token},
+            )
+        if r.status_code != 200:
+            return None
+        md = (r.json() or {}).get("markdown")
+        return md if isinstance(md, str) and md.strip() else None
+    except Exception:
         return None
 
 
@@ -190,12 +220,21 @@ def _empty_result() -> dict:
 
 # 채권최고액 패턴. "채권최고액 금 1,500,000,000원" / "채권최고액금500,000,000원" 등 변형 허용.
 _MORTGAGE_AMOUNT_RE = re.compile(r"채권최고액\s*금?\s*([\d,]+)\s*원")
+# 합산에서 제외해야 할 등기 유형. 매치 직전 200자 윈도우에 등장하면 그 채권최고액은 근저당설정 항목이 아님.
+_NON_SETTING_PURPOSE_RE = re.compile(r"근질권|근저당권변경|근저당권이전|전세권")
 
 
 def _extract_mortgage_amounts(text: str) -> list[int]:
-    """원문 markdown 에서 '채권최고액 금 XXX원' 패턴을 모두 추출."""
+    """원문 markdown 에서 활성 근저당권설정의 '채권최고액 금 XXX원' 만 추출.
+
+    근질권·근저당권변경·근저당권이전·전세권에 딸린 채권최고액은 제외 (max_bond_amount
+    합계에 합산되지 않아야 하는 항목 — 이중계상 방지).
+    """
     amounts: list[int] = []
     for m in _MORTGAGE_AMOUNT_RE.finditer(text):
+        window = text[max(0, m.start() - 200): m.start()]
+        if _NON_SETTING_PURPOSE_RE.search(window):
+            continue
         try:
             amounts.append(int(m.group(1).replace(",", "")))
         except ValueError:
@@ -303,7 +342,10 @@ CRITIQUE_PROMPT = """당신은 한국 등기부등본 분석 결과를 검증하
    - 요약에 N건 있는데 1차 결과가 더 많으면 추가분은 말소 의심.
    - **rank_number 는 요약 페이지의 "순위번호" 와 일치해야 함.** 본문 표의 페이지내 순번과 다르면 issue.
 4. mortgage_entries[*].target_owner: 갑구 소유자 또는 원문의 "대상소유자" 열과 일치. OCR 잡음(예: '박혜민' → '유옥') 으로 변형된 이름은 issue.
-5. max_bond_amount: 활성(요약 기준) 근저당권 채권최고액 합계 정확성. 요약이 "기록사항 없음" 이면 0.
+5. max_bond_amount: 활성(요약 기준) **근저당권설정** 항목의 채권최고액만 합산했는지 검증.
+   - "근질권설정" / "근저당권이전" / "근저당권변경" 항목의 채권최고액을 별도 가산하지 않았는지 확인 (이중계상 issue).
+   - "근저당권변경" 으로 채권최고액이 갱신된 근저당은 변경 후 최신 금액만 반영되어야 함. 원금+변경금 둘 다 더해져 있으면 issue.
+   - 요약이 "기록사항 없음" 이면 0.
 6. tenant_deposit: 임차보증금 누락 여부.
 7. *_summary 필드: 원문에 없는 정보를 추측하지 않았는지.
 
@@ -316,15 +358,17 @@ CRITIQUE_PROMPT = """당신은 한국 등기부등본 분석 결과를 검증하
 """
 
 
-def _run_critique(client, text: str, pass1_json: str) -> list[str]:
+def _run_critique(client, db, text: str, pass1_json: str) -> list[str]:
     """LLM self-critique. 발견된 issues list. 실패 시 빈 list."""
+    from services.prompt_registry import get_prompt
     user = (
         f"원문 (markdown):\n\n{text}\n\n"
         f"1차 분석 결과(JSON):\n\n{pass1_json}\n\n"
         "위 두 입력을 비교해 issues 를 JSON 으로 답하세요."
     )
     try:
-        result = client.complete(user, system=CRITIQUE_PROMPT, json_mode=True)
+        critique_prompt = get_prompt(db, "rights", "critique", CRITIQUE_PROMPT)
+        result = client.complete(user, system=critique_prompt, json_mode=True)
         raw = (result.get("text") or "").strip()
         if not raw:
             return []
@@ -356,11 +400,13 @@ def generate_or_get_cached(
             except json.JSONDecodeError:
                 pass  # 캐시 깨짐 → 재생성
 
-    pdf_bytes = _fetch_pdf_blob(registry_ic_id)
-    if not pdf_bytes:
-        return _empty_result()
-
-    text = _extract_markdown(pdf_bytes)
+    # 등기부 API 가 PDF 발급 시 캐싱한 markdown 우선 사용 (MinerU 재호출 회피).
+    text = _fetch_cached_markdown(registry_ic_id) or ""
+    if not text:
+        pdf_bytes = _fetch_pdf_blob(registry_ic_id)
+        if not pdf_bytes:
+            return _empty_result()
+        text = _extract_markdown(pdf_bytes)
     if not text.strip():
         logger.warning(f"[ai_rights] {registry_ic_id}: empty PDF text")
         return _empty_result()
@@ -382,8 +428,10 @@ def generate_or_get_cached(
 
     try:
         from services.llm_service import LLMClient
+        from services.prompt_registry import get_prompt
         client = LLMClient()
-        result = client.complete(user_prompt, system=SYSTEM_PROMPT, json_mode=True)
+        system_prompt = get_prompt(db, "rights", "system", SYSTEM_PROMPT)
+        result = client.complete(user_prompt, system=system_prompt, json_mode=True)
         raw = (result.get("text") or "").strip()
         if not raw:
             return _empty_result()
@@ -397,7 +445,7 @@ def generate_or_get_cached(
         # 자기검증 단계: 결정적 게이트 + LLM critique 로 issue 수집, 있으면 1회 재생성.
         pass1_json = json.dumps(parsed, ensure_ascii=False)
         issues = _deterministic_issues(text, parsed)
-        issues += _run_critique(client, text, pass1_json)
+        issues += _run_critique(client, db, text, pass1_json)
         if issues:
             logger.info(
                 f"[ai_rights] {registry_ic_id}: critique issues={len(issues)}, regenerating"
@@ -410,7 +458,7 @@ def generate_or_get_cached(
                 + "\n\n지적사항을 반영해 시스템 메시지의 JSON 스키마로 전체 결과를 재생성하세요."
             )
             try:
-                result2 = client.complete(regen_prompt, system=SYSTEM_PROMPT, json_mode=True)
+                result2 = client.complete(regen_prompt, system=system_prompt, json_mode=True)
                 raw2 = (result2.get("text") or "").strip()
                 parsed2 = json.loads(raw2) if raw2 else None
                 if parsed2:

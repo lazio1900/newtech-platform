@@ -87,6 +87,15 @@
   gap: 4px;
 }
 
+.sidebar-bottom {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .sidebar-btn {
   display: flex;
   align-items: center;
@@ -576,4 +585,73 @@
   .dashboard-cards {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* ----- 직접조회 분석 결과 모달 ----- */
+.direct-result-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.direct-result-modal {
+  background: #fff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 1280px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.direct-result-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #E5E7EB;
+  background: #F9FAFB;
+}
+
+.direct-result-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.direct-result-close {
+  background: transparent;
+  border: none;
+  color: #6B7785;
+  font-size: 18px;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.direct-result-close:hover:not(:disabled) {
+  background: #E5E7EB;
+  color: #1F2937;
+}
+.direct-result-close:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.direct-result-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
 }

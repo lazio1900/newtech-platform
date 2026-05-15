@@ -33,4 +33,6 @@ def analyze(
         area_id=request.area_id,
         complex_name=request.complex_name,
         application_id=request.application_id,
+        registry_ic_id=request.registry_ic_id,
+        interest_rate=request.interest_rate,
     )

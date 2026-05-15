@@ -1,0 +1,35 @@
+# 개발 오버라이드.
+#
+# 사용:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# 효과:
+#   - backend: 호스트 ./backend 를 컨테이너 /app 에 마운트, uvicorn --reload 로 핫리로드
+#   - frontend: vite dev 서버로 전환 (nginx 대신), HMR 동작
+#   - postgres/redis/mineru-api: 변경 없음 (prod 와 동일)
+#
+# 코드는 호스트에 그대로 두고 프로세스만 컨테이너에서 돔. 의존성·DB 연결·MinerU 사이드카는
+# 운영 환경과 동일.
+services:
+  backend:
+    volumes:
+      - ./backend:/app
+    environment:
+      WATCHFILES_FORCE_POLLING: "true"  # Docker Desktop on macOS 파일감지 안정화
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--reload"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # 컨테이너 안 node_modules 가 호스트 마운트에 덮이지 않도록 보존
+    environment:
+      VITE_DEV_API_TARGET: http://backend:8002
+      VITE_MAP_TILE_URL: "${VITE_MAP_TILE_URL:-https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png}"
+      VITE_MAP_TILE_ATTRIBUTION: "${VITE_MAP_TILE_ATTRIBUTION:-&copy; OpenStreetMap}"
+      CHOKIDAR_USEPOLLING: "true"       # 파일감지 안정화
+    ports: !override
+      - "${FRONTEND_PORT:-5173}:5173"
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]

@@ -93,6 +93,7 @@ class Listing(Base):
     ask_price = Column(BigInteger, nullable=False, comment="호가 (원)")
     exclusive_m2 = Column(Float, nullable=True, comment="전용면적 (㎡)")
     floor = Column(Integer, nullable=True, comment="층")
+    trade_type = Column(String(10), nullable=True, comment="거래유형: 매매 / 전세 / 월세")
     
     # 상태
     status = Column(Enum(ListingStatus), default=ListingStatus.ACTIVE, comment="매물 상태")

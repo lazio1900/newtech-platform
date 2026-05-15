@@ -1,0 +1,41 @@
+.admin-panel {
+  padding: 24px;
+}
+
+.admin-panel-header {
+  margin-bottom: 16px;
+}
+.admin-panel-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.admin-subnav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #E5E7EB;
+  margin-bottom: 20px;
+}
+
+.admin-subnav-btn {
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #6B7785;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.admin-subnav-btn:hover {
+  color: #1F2937;
+}
+.admin-subnav-btn.active {
+  border-bottom-color: #006FBD;
+  color: #006FBD;
+  font-weight: 700;
+}
+

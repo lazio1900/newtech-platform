@@ -14,6 +14,8 @@ class AnalysisRequest(BaseModel):
     complex_name: Optional[str] = Field(None, description="단지명 스냅샷")
     pyeong: Optional[int] = Field(None, description="평수 (정확 매칭용)")
     application_id: Optional[str] = Field(None, description="신청건 ID (LLM 캐시 키)")
+    registry_ic_id: Optional[int] = Field(None, description="등기부 발급 ID — 직접조회 시 권리분석 입력")
+    interest_rate: Optional[float] = Field(None, ge=0, le=100, description="입력 금리(연 %) — AI LTV 검토 prompt 에 인용")
 
     class Config:
         json_schema_extra = {

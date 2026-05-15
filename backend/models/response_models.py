@@ -82,9 +82,11 @@ class PropertyRightsInfo(BaseModel):
 
 
 class PricePoint(BaseModel):
-    """가격 데이터 포인트"""
+    """가격 데이터 포인트. KB 시세 history 만 low/high 채움."""
     date: str
     price: int
+    low: Optional[int] = None
+    high: Optional[int] = None
 
 
 class KBPrice(BaseModel):
@@ -97,19 +99,19 @@ class KBPrice(BaseModel):
 
 
 class MOLITTransactions(BaseModel):
-    """국토교통부 실거래가 정보"""
-    recent_price: int
-    transaction_date: str
+    """국토교통부 실거래가 정보. 수집 데이터 없으면 recent_price=None."""
+    recent_price: Optional[int] = None
+    transaction_date: Optional[str] = None
     trend: str
-    history: List[PricePoint]  # 최근 3개월 실거래가 (여러 건)
+    history: List[PricePoint]  # 비어있을 수 있음
 
 
 class NaverListings(BaseModel):
-    """네이버 매매호가 정보"""
-    avg_asking: int
+    """네이버 매매호가 정보. 수집 데이터 없으면 avg_asking=None."""
+    avg_asking: Optional[int] = None
     listing_count: int
     trend: str
-    history: List[PricePoint]  # 최근 3개월 호가 (여러 건)
+    history: List[PricePoint]  # 비어있을 수 있음
 
 
 class ForecastPoint(BaseModel):

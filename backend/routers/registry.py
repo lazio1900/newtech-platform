@@ -8,6 +8,7 @@
 등기부 API 가 X-Internal-Token 인증을 요구하므로 backend 가 토큰을 추가해 forward.
 """
 import logging
+import re
 from typing import Optional
 
 import httpx
@@ -63,15 +64,41 @@ def _is_no_match_failure(resp_json: dict) -> bool:
     return status == "failed" and "검색 결과" in err
 
 
-def _build_address_candidates(complex_obj, building_name: Optional[str]) -> list[str]:
-    """IROS 매칭률 ↑ 를 위한 4단계 후보 주소.
+_PAREN_RE = re.compile(r"\(([^()]+)\)")
 
-    순서:
-      1. 지번 (단지명 없이)
-      2. 도로명 (단지명 없이)
-      3. 지번 + Daum 단지명 (popup 사용 시)
-      4. 도로명 + Daum 단지명 (popup 사용 시)
-    중복은 제거.
+
+def _name_variants(name: str) -> list[str]:
+    """KB 단지명 → IROS 매칭용 표기 변형.
+
+    KB 는 시공사를 괄호로 표기 ("아름마을(효성)") 하지만 IROS 등기부에는
+    괄호가 없거나 공백으로 분리된 경우가 많다. 원본 표기 우선, 변형은 보조.
+    """
+    out: list[str] = [name]
+    if _PAREN_RE.search(name):
+        spaced = _PAREN_RE.sub(lambda m: f" {m.group(1)}", name)
+        out.append(" ".join(spaced.split()))  # 다중 공백 정규화
+        out.append(_PAREN_RE.sub(lambda m: m.group(1), name))  # 괄호 제거(공백 없음)
+    # 중복 제거 (순서 보존)
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for v in out:
+        v = v.strip()
+        if v and v not in seen:
+            uniq.append(v)
+            seen.add(v)
+    return uniq
+
+
+def _build_address_candidates(complex_obj, building_name: Optional[str]) -> list[str]:
+    """IROS 매칭률 ↑ 를 위한 후보 주소.
+
+    순서 (코드상 단지명을 도로검색기 단지명보다 먼저, 동·호는 service 에서 append):
+      1. 지번 + 코드 단지명 (complex.name)
+      2. 도로명 + 코드 단지명
+      3. 지번 + Daum 단지명 (building_name)
+      4. 도로명 + Daum 단지명
+    코드 단지명에 괄호가 있으면 "괄호→공백" / "괄호 제거" 변형을 같은 단계의
+    보조 후보로 끼워 넣는다 (예: "아름마을(효성)" → "아름마을 효성" / "아름마을효성").
     """
     candidates: list[str] = []
     seen: set[str] = set()
@@ -84,17 +111,21 @@ def _build_address_candidates(complex_obj, building_name: Optional[str]) -> list
 
     jibun = (complex_obj.address or "").strip()
     road = (complex_obj.road_address or "").strip()
-    bname = (building_name or "").strip()
+    code_name = (complex_obj.name or "").strip()
+    daum_name = (building_name or "").strip()
 
-    if jibun:
-        add(jibun)
-    if road:
-        add(road)
-    if bname:
-        if jibun:
-            add(f"{jibun} {bname}")
-        if road:
-            add(f"{road} {bname}")
+    if code_name:
+        for variant in _name_variants(code_name):
+            if jibun:
+                add(f"{jibun} {variant}")
+            if road:
+                add(f"{road} {variant}")
+    if daum_name:
+        for variant in _name_variants(daum_name):
+            if jibun:
+                add(f"{jibun} {variant}")
+            if road:
+                add(f"{road} {variant}")
     return candidates
 
 
@@ -192,6 +223,63 @@ def get_registry(
             detail = r.text
         raise HTTPException(status_code=r.status_code, detail=detail)
     return r.json()
+
+
+@router.get("/{ic_id}/area")
+def get_registry_area(
+    ic_id: int,
+    complex_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """등기부 markdown 의 표제부에서 전용면적 추출 + 단지 area 중 가장 가까운 평형 추천.
+
+    응답:
+      {
+        "exclusive_m2": 49.77,             # 등기부에서 추출 (null 가능)
+        "suggested_area_id": 12,           # 가장 가까운 KB area (null 가능)
+        "areas": [{id, exclusive_m2, pyeong}...]  # 수정용 후보 목록
+      }
+    """
+    from models.complex import Area
+    from services.registry_area_extractor import extract_exclusive_m2
+
+    try:
+        with httpx.Client(timeout=10) as client:
+            r = client.get(
+                f"{settings.registry_api_url}/v1/registry/{ic_id}/markdown",
+                headers=_registry_headers(),
+            )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"등기부 API 통신 실패: {e}")
+
+    exclusive_m2: Optional[float] = None
+    if r.status_code == 200:
+        md = (r.json() or {}).get("markdown") or ""
+        exclusive_m2 = extract_exclusive_m2(md)
+    elif r.status_code != 404:
+        # 202(처리중) 등은 추출 실패로만 처리 — UI 는 수동 선택 fallback
+        logger.info(f"[registry_area] ic_id={ic_id} markdown unavailable: HTTP {r.status_code}")
+
+    areas = (
+        db.query(Area)
+        .filter(Area.complex_id == complex_id)
+        .order_by(Area.exclusive_m2.asc())
+        .all()
+    )
+    suggested_area_id: Optional[int] = None
+    if exclusive_m2 is not None and areas:
+        suggested = min(areas, key=lambda a: abs((a.exclusive_m2 or 0) - exclusive_m2))
+        suggested_area_id = suggested.id
+
+    return {
+        "exclusive_m2": exclusive_m2,
+        "suggested_area_id": suggested_area_id,
+        "areas": [
+            {"id": a.id, "exclusive_m2": a.exclusive_m2, "pyeong": a.pyeong}
+            for a in areas
+        ],
+    }
 
 
 @router.get("/{ic_id}/pdf")

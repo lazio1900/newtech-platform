@@ -19,6 +19,12 @@ export interface RegistryRequestOut {
   error_message: string | null;
 }
 
+export interface RegistryAreaSuggestion {
+  exclusive_m2: number | null;          // 등기부 표제부에서 추출한 전용면적
+  suggested_area_id: number | null;     // 가장 가까운 KB area
+  areas: Array<{ id: number; exclusive_m2: number; pyeong: number | null }>;
+}
+
 /**
  * 등기부등본 발급 요청.
  * newtech-platform backend 가 등기부등본api 로 X-Internal-Token 과 함께 forward.
@@ -38,6 +44,18 @@ export const registryApi = {
   /** 발급 상태 조회 (폴링용) */
   get: async (icId: number): Promise<RegistryRequestOut> => {
     const { data } = await apiClient.get<RegistryRequestOut>(`/api/registry/${icId}`);
+    return data;
+  },
+
+  /** 등기부 표제부 → 전용면적 + 추천 area_id (수정용 후보 목록 포함) */
+  getAreaSuggestion: async (
+    icId: number,
+    complexId: number,
+  ): Promise<RegistryAreaSuggestion> => {
+    const { data } = await apiClient.get<RegistryAreaSuggestion>(
+      `/api/registry/${icId}/area`,
+      { params: { complex_id: complexId } },
+    );
     return data;
   },
 

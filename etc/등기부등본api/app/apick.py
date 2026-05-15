@@ -28,8 +28,13 @@ class ApickClient:
         else:
             data["address"] = address
 
-        with httpx.Client(timeout=self.timeout) as client:
-            r = client.post(url, headers=self.headers, data=data)
+        # httpx 네트워크 에러를 ApickError 로 정규화 — 백그라운드 스레드가 silently
+        # 죽지 않고 _download_in_background 에서 status='failed' 처리되도록 함.
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                r = client.post(url, headers=self.headers, data=data)
+        except httpx.HTTPError as e:
+            raise ApickError(f"iros: network error {type(e).__name__}: {e}") from e
         # 에이픽은 비즈니스 실패에도 HTTP 401을 쓰고 body는 정상 JSON으로 옴.
         # status code로 분기하지 않고 JSON 파싱 가능 여부로 분기한다.
         try:
@@ -41,12 +46,15 @@ class ApickClient:
 
     def download(self, ic_id: int, fmt: str = "pdf") -> Tuple[Optional[bytes], int]:
         url = f"{self.base_url}/rest/iros_download/1"
-        with httpx.Client(timeout=self.timeout) as client:
-            r = client.post(
-                url,
-                headers=self.headers,
-                data={"ic_id": str(ic_id), "format": fmt},
-            )
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                r = client.post(
+                    url,
+                    headers=self.headers,
+                    data={"ic_id": str(ic_id), "format": fmt},
+                )
+        except httpx.HTTPError as e:
+            raise ApickError(f"download: network error {type(e).__name__}: {e}") from e
         # 가이드: 응답 헤더 result (1=성공, 2=처리중)
         result_raw = r.headers.get("result", "0")
         try:

@@ -22,5 +22,11 @@ class Settings(BaseSettings):
     # 안전마진으로 8회(=최대 ~40초)면 충분.
     DOWNLOAD_POLL_MAX_TRIES: int = 8
 
+    # MinerU markdown 변환 (선택). PDF 저장 후 1회 호출해 markdown 캐시.
+    # 실패는 silent — PDF 발급은 그대로 성공 처리.
+    MINERU_API_URL: str = "http://localhost:8200"
+    MINERU_TIMEOUT: int = 300
+    MINERU_ENABLED: bool = True
+
 
 settings = Settings()

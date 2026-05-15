@@ -91,7 +91,7 @@ def build_prompt(
         if jd.forecast and len(jd.forecast) >= 4:
             f3 = jd.forecast[3]
             jb_section += (
-                f"  +3개월 예측: 중심 {_won(f3.predicted)} / 하한 {_won(f3.lower)} / 상한 {_won(f3.upper)} (90% CI)\n"
+                f"  +3개월 예측: 중심 {_won(f3.predicted)} / 하한 {_won(f3.lower)} / 상한 {_won(f3.upper)} (80% CI)\n"
             )
 
     # 인근 유사물건
@@ -191,8 +191,10 @@ def generate_or_get_cached(
 
     try:
         from services.llm_service import LLMClient
+        from services.prompt_registry import get_prompt
         client = LLMClient()
-        result = client.complete(prompt, system=SYSTEM_PROMPT, json_mode=True)
+        system_prompt = get_prompt(db, "overall", "system", SYSTEM_PROMPT)
+        result = client.complete(prompt, system=system_prompt, json_mode=True)
         raw = (result.get("text") or "").strip()
         if not raw:
             return fallback

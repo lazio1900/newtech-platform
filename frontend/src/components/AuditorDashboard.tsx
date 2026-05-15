@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import InputSection from './InputSection';
+import DirectAnalysisForm, { type DirectAnalyzePayload } from './DirectAnalysisForm';
 import BorrowerInfo from './BorrowerInfo';
 import GuarantorInfo from './GuarantorInfo';
 import PropertyBasicInfo from './PropertyBasicInfo';
@@ -21,9 +21,13 @@ import { analyzeProperty } from '@/api/analysis';
 import { getApplications, updateApplicationStatus } from '@/api/applications';
 import { addMonitoringLoan } from '@/api/monitoring';
 import type { User, LoanApplication, AnalysisResponse } from '@/types/loan';
+import AdminPanel from './AdminPanel';
+import Settings from './Settings';
+import UserProfileMenu from './UserProfileMenu';
+import { getDefaultTab } from '@/lib/interfacePrefs';
 import './AuditorDashboard.css';
 
-type ActiveTab = 'dashboard' | 'direct' | 'applications' | 'monitoring';
+type ActiveTab = 'dashboard' | 'direct' | 'applications' | 'monitoring' | 'my-account' | 'admin-users';
 
 interface AuditorDashboardProps {
   user: User;
@@ -39,7 +43,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default function AuditorDashboard({ user, onLogout }: AuditorDashboardProps) {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(getDefaultTab());
 
   // 직접조회 상태
   const [loading, setLoading] = useState<boolean>(false);
@@ -59,6 +63,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
   const [directLoanAmount, setDirectLoanAmount] = useState<number>(0);
   const [directInterestRate, setDirectInterestRate] = useState<number>(7.5);
   const [directLoanDuration, setDirectLoanDuration] = useState<number>(12);
+  const [directRegistryIcId, setDirectRegistryIcId] = useState<number | null>(null);
 
   // 심사역 종합 의견
   const [auditorOpinion, setAuditorOpinion] = useState<string>('');
@@ -85,17 +90,36 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
     }
   };
 
-  const handleAnalyze = async (company: string, address: string, loanAmount: number, interestRate: number, duration: number) => {
-    setDirectLoanAmount(parseInt(String(loanAmount)));
-    setDirectInterestRate(interestRate);
-    setDirectLoanDuration(duration);
+  const handleAnalyze = async (payload: DirectAnalyzePayload) => {
+    setDirectLoanAmount(parseInt(String(payload.loanAmount)));
+    setDirectInterestRate(payload.interestRate);
+    setDirectLoanDuration(payload.duration);
+    setDirectRegistryIcId(payload.options.registry_ic_id ?? null);
     setLoading(true);
     setError(null);
     try {
-      const response = await analyzeProperty(company, address, loanAmount);
+      const response = await analyzeProperty(
+        payload.company,
+        payload.address,
+        payload.loanAmount,
+        {
+          complexId: payload.options.complex_id ?? null,
+          areaId: payload.options.area_id ?? null,
+          complexName: payload.options.complex_name ?? null,
+          pyeong: payload.options.pyeong ?? null,
+          registryIcId: payload.options.registry_ic_id ?? null,
+          interestRate: payload.interestRate,
+        },
+      );
       setAnalysisData(response);
-    } catch (err: any) {
-      setError(err.message || '분석 중 오류가 발생했습니다.');
+    } catch (err) {
+      const e = err as { code?: string; message?: string; response?: { data?: { detail?: string } } };
+      const isTimeout = e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message || '');
+      setError(
+        isTimeout
+          ? '분석에 시간이 오래 걸려 응답을 받지 못했습니다. 잠시 후 다시 시도해주세요.'
+          : (e?.response?.data?.detail || e?.message || '분석 중 오류가 발생했습니다.'),
+      );
     } finally {
       setLoading(false);
     }
@@ -199,7 +223,10 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
           <PriceCharts data={data.credit_data} loanDuration={loanDuration} />
         </div>
         <div className="market-right">
-          <AIMarketAnalysis analysis={data.ai_analysis.market_analysis} />
+          <AIMarketAnalysis
+            analysis={data.ai_analysis.market_analysis}
+            jbDetail={data.credit_data.jb_detail}
+          />
         </div>
       </div>
 
@@ -774,8 +801,7 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
           <h1>질권 담보 대출 업무 플랫폼</h1>
         </div>
         <div className="header-right">
-          <span className="user-info">심사자: {user.ceo_name || user.user_id}</span>
-          <button className="logout-btn" onClick={onLogout}>로그아웃</button>
+          {/* 사용자 정보 / 로그아웃은 좌측 사이드바 하단 사용자 메뉴로 이동 */}
         </div>
       </header>
 
@@ -810,6 +836,16 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
           >
             사후모니터링
           </button>
+
+          {/* 하단 — 사용자 프로필 + 드롭다운 메뉴 (OpenWebUI 스타일) */}
+          <div className="sidebar-bottom">
+            <UserProfileMenu
+              user={user}
+              onOpenAccount={() => setActiveTab('my-account')}
+              onOpenAdminPanel={() => setActiveTab('admin-users')}
+              onLogout={onLogout}
+            />
+          </div>
         </nav>
 
         <div className="dashboard-content">
@@ -895,29 +931,51 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
         {/* 직접조회하기 탭 */}
         {activeTab === 'direct' && (
           <div className="direct-tab">
-            <InputSection onAnalyze={handleAnalyze} loading={loading} />
+            <DirectAnalysisForm onAnalyze={handleAnalyze} loading={loading} />
 
-            {error && (
-              <div className="error-message">
-                <p>{error}</p>
-                <button onClick={() => setError(null)}>닫기</button>
-              </div>
-            )}
-
-            {loading && (
-              <div className="loading-message">
-                <div className="spinner"></div>
-                <p>분석 중입니다. 잠시만 기다려주세요...</p>
-              </div>
-            )}
-
-            {analysisData && !loading && renderAnalysisResult(
-              analysisData, showRegistryModal, setShowRegistryModal, directLoanAmount, directInterestRate, directLoanDuration
-            )}
-
-            {!analysisData && !loading && !error && (
-              <div className="empty-state">
-                <p>업체명, 담보주소, 대출신청금액을 입력하고 분석 버튼을 눌러주세요.</p>
+            {(loading || analysisData || error) && (
+              <div
+                className="direct-result-modal-backdrop"
+                onClick={() => {
+                  if (loading) return;  // 분석 중엔 닫기 금지
+                  setAnalysisData(null);
+                  setError(null);
+                }}
+              >
+                <div
+                  className="direct-result-modal"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="direct-result-modal-header">
+                    <h3>분석 결과</h3>
+                    <button
+                      className="direct-result-close"
+                      disabled={loading}
+                      onClick={() => { setAnalysisData(null); setError(null); }}
+                      aria-label="닫기"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="direct-result-modal-body">
+                    {loading && (
+                      <div className="loading-message">
+                        <div className="spinner"></div>
+                        <p>분석 중입니다. 잠시만 기다려주세요...</p>
+                      </div>
+                    )}
+                    {error && !loading && (
+                      <div className="error-message">
+                        <p>{error}</p>
+                      </div>
+                    )}
+                    {analysisData && !loading && renderAnalysisResult(
+                      analysisData, showRegistryModal, setShowRegistryModal,
+                      directLoanAmount, directInterestRate, directLoanDuration,
+                      directRegistryIcId,
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -1003,13 +1061,8 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                       )}
                       {selectedApp.exclusive_m2 != null && (
                         <span className="property-meta">
-                          {selectedApp.exclusive_m2.toFixed(0)}㎡
+                          {selectedApp.exclusive_m2.toFixed(2)}㎡
                           {selectedApp.pyeong ? ` (${selectedApp.pyeong}평)` : ''}
-                        </span>
-                      )}
-                      {(selectedApp.dong || selectedApp.ho) && (
-                        <span className="property-meta">
-                          {[selectedApp.dong, selectedApp.ho].filter(Boolean).join(' ')}
                         </span>
                       )}
                     </div>
@@ -1085,6 +1138,16 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
         {/* 사후모니터링 탭 */}
         {activeTab === 'monitoring' && (
           <MonitoringTab />
+        )}
+
+        {/* 설정 탭 (계정 정보 + 화면 인터페이스 서브탭) */}
+        {activeTab === 'my-account' && (
+          <Settings user={user} />
+        )}
+
+        {/* 관리자 패널 — admin 전용. 내부 서브탭(사용자 / LLM 연결) */}
+        {activeTab === 'admin-users' && user.role === 'admin' && (
+          <AdminPanel />
         )}
         </div>
       </div>

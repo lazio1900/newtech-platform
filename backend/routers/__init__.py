@@ -1,5 +1,10 @@
 """API routers package."""
 from routers import (
+    admin_data_mappings,
+    admin_db,
+    admin_llm,
+    admin_prompts,
+    admin_users,
     analyze,
     applications,
     auth,
@@ -8,9 +13,15 @@ from routers import (
     monitoring,
     registry,
     suggestions,
+    users,
 )
 
 __all__ = [
+    "admin_data_mappings",
+    "admin_db",
+    "admin_llm",
+    "admin_prompts",
+    "admin_users",
     "analyze",
     "applications",
     "auth",
@@ -19,4 +30,5 @@ __all__ = [
     "monitoring",
     "registry",
     "suggestions",
+    "users",
 ]

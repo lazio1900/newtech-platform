@@ -21,6 +21,7 @@ class RegistryRequestOut(BaseModel):
     cost: int = 0
     cached: bool = False
     error_message: Optional[str] = None
+    markdown: Optional[str] = None
 
 
 class UsageOut(BaseModel):

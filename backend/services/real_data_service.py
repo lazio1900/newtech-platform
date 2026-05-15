@@ -49,6 +49,23 @@ _LOCATION_BLACKLIST = {
 _ADDR_SUFFIXES = ("시", "도", "구", "동", "읍", "면", "리", "로", "길")
 
 
+def _iqr_filter(values: list[float], k: float = 1.5) -> list[float]:
+    """IQR k× 아웃라이어 제거. 표본 4건 미만은 필터 의미 없어 그대로 반환."""
+    n = len(values)
+    if n < 4:
+        return values
+    sv = sorted(values)
+    # 단순 중앙값 기반 사분위 (linear interpolation 생략 — 정밀도 충분)
+    q1 = sv[n // 4]
+    q3 = sv[(3 * n) // 4]
+    iqr = q3 - q1
+    if iqr <= 0:
+        return values
+    lo = q1 - k * iqr
+    hi = q3 + k * iqr
+    return [v for v in values if lo <= v <= hi]
+
+
 def _last_meaningful_token(tokens: list) -> str:
     """입력 토큰들 중 동·호·번지 같은 마커 제외하고 마지막 의미있는 토큰 반환."""
     skip_re = re.compile(r"^[\d\-]+(동|호|층|번지)?$|^\d+$")
@@ -210,40 +227,62 @@ def build_real_credit_data(
     molit_data = _build_molit_transactions(
         db, complex_obj.id, area_obj.exclusive_m2, cutoff
     )
-    naver_data = _build_naver_listings(db, complex_obj.id, cutoff)
+    naver_data = _build_naver_listings(db, complex_obj.id, area_obj.exclusive_m2, cutoff)
 
     if kb_data is None:
         return None
 
     if molit_data is None:
         molit_data = MOLITTransactions(
-            recent_price=kb_data.estimated,
-            transaction_date=today.strftime("%Y-%m-%d"),
-            trend="데이터 부족",
+            recent_price=None,
+            transaction_date=None,
+            trend="데이터 없음",
             history=[],
         )
 
     if naver_data is None:
         naver_data = NaverListings(
-            avg_asking=kb_data.estimated,
+            avg_asking=None,
             listing_count=0,
-            trend="데이터 부족",
+            trend="데이터 없음",
             history=[],
         )
 
-    # JB 적정시세 1단계 — 동적 가중치 + IQR + 시간 감쇠
+    # JB 적정시세 — 월별 IQR 평균 집계 + 동적 가중치 + OLS 예측
     from services.jb_fair_price import (
-        JBComputeInput,
-        compute_jb_fair_price,
+        aggregate_monthly_series,
+        compute_jb_for_month,
+        compute_latest_jb,
+        project_jb_forecast,
     )
-    from models.response_models import JBFairPriceDetail
+    from models.response_models import JBFairPriceDetail, ForecastPoint as ForecastPointSchema
 
-    # 12M 실거래 (날짜+가격 페어)
-    txns_for_jb = (
-        db.query(Transaction)
+    # 12M 격자 (이번 달 포함, 직전 11개월부터)
+    end_month_year, end_month_mon = today.year, today.month
+    start_month_year, start_month_mon = end_month_year, end_month_mon - 11
+    while start_month_mon < 1:
+        start_month_mon += 12
+        start_month_year -= 1
+    start_month = date(start_month_year, start_month_mon, 1)
+    end_month = date(end_month_year, end_month_mon, 1)
+
+    # raw 데이터 재조회 — 월별 집계용
+    kb_rows = (
+        db.query(KBPriceModel.as_of_date, KBPriceModel.general_price)
+        .filter(
+            KBPriceModel.complex_id == complex_obj.id,
+            KBPriceModel.area_id == area_obj.id,
+            KBPriceModel.as_of_date >= start_month,
+        )
+        .all()
+    )
+    kb_raw = [(r[0], r[1]) for r in kb_rows if r[1]]
+
+    txn_rows = (
+        db.query(Transaction.contract_date, Transaction.price)
         .filter(
             Transaction.complex_id == complex_obj.id,
-            Transaction.contract_date >= cutoff,
+            Transaction.contract_date >= start_month,
             Transaction.is_cancelled == False,
             Transaction.exclusive_m2.between(
                 area_obj.exclusive_m2 - 5.0,
@@ -252,74 +291,86 @@ def build_real_credit_data(
         )
         .all()
     )
-    txn_pairs = [(t.contract_date, t.price) for t in txns_for_jb]
+    txn_raw = [(r[0], r[1]) for r in txn_rows]
 
-    # active 매물 호가
-    active_prices = [
-        l.ask_price for l in db.query(Listing).filter(
+    # 호가 — status 와 무관히 posted_at 기준 (closed 매물도 그 월에 살아있었던 것이면 반영).
+    # 매매 거래유형만, 면적 ±5㎡ 톨러런스.
+    listing_rows = (
+        db.query(Listing.posted_at, Listing.status_updated_at, Listing.ask_price)
+        .filter(
             Listing.complex_id == complex_obj.id,
-            Listing.status == ListingStatus.ACTIVE,
-        ).all() if l.ask_price
-    ]
-
-    jb_input = JBComputeInput(
-        kb_estimated=kb_data.estimated,
-        transactions=txn_pairs,
-        active_listing_prices=active_prices,
-        today=today,
-    )
-    jb_result = compute_jb_fair_price(jb_input)
-
-    # JB 추이 — KB history 의 각 시점마다 산출 (해당 시점 기준 12M 실거래 슬라이싱)
-    jb_history: list[PricePoint] = []
-    for kb_pt in kb_data.history:
-        try:
-            pt_date = date.fromisoformat(kb_pt.date)
-        except (ValueError, TypeError):
-            continue
-        pt_cutoff = pt_date - timedelta(days=365)
-        pt_txns = [(d, p) for d, p in txn_pairs if pt_cutoff <= d <= pt_date]
-        pt_input = JBComputeInput(
-            kb_estimated=kb_pt.price,
-            transactions=pt_txns,
-            active_listing_prices=active_prices,
-            today=pt_date,
+            Listing.ask_price.isnot(None),
+            Listing.trade_type == "매매",
+            Listing.exclusive_m2.between(
+                area_obj.exclusive_m2 - 5.0,
+                area_obj.exclusive_m2 + 5.0,
+            ),
         )
-        pt_result = compute_jb_fair_price(pt_input)
-        jb_history.append(PricePoint(date=kb_pt.date, price=pt_result.jb_fair_price))
-
-    # 예측 — 단순 트렌드 + 90% 신뢰구간 (대출기간만큼)
-    from services.jb_fair_price import project_jb_forecast
-    from models.response_models import ForecastPoint as ForecastPointSchema
-
-    forecast_points = project_jb_forecast(
-        current_jb=jb_result.jb_fair_price,
-        transactions=txn_pairs,
-        today=today,
-        horizon_months=12,
+        .all()
     )
-    forecast_schema = []
-    for fp in forecast_points:
-        d = today + timedelta(days=int(fp.month * 30.4375))
-        forecast_schema.append(ForecastPointSchema(
-            date=d.strftime("%Y-%m-%d"),
-            predicted=fp.predicted,
-            lower=fp.lower,
-            upper=fp.upper,
-        ))
+    listing_raw: list[tuple[date, Optional[date], int]] = []
+    for posted, status_upd, price in listing_rows:
+        if posted is None:
+            continue
+        p_d = posted.date() if hasattr(posted, "date") else posted
+        s_d = status_upd.date() if status_upd and hasattr(status_upd, "date") else status_upd
+        listing_raw.append((p_d, s_d, price))
+
+    # 월별 집계 → 월별 JB 산출 → history
+    monthly = aggregate_monthly_series(kb_raw, txn_raw, listing_raw, start_month, end_month)
+
+    jb_history_points: list[PricePoint] = []
+    jb_history_tuples: list[tuple[int, int, int]] = []
+    for agg in monthly:
+        pt = compute_jb_for_month(agg)
+        if pt.jb_fair_price is None:
+            continue
+        d_str = f"{agg.year:04d}-{agg.month:02d}-01"
+        jb_history_points.append(PricePoint(date=d_str, price=pt.jb_fair_price))
+        jb_history_tuples.append((agg.year, agg.month, pt.jb_fair_price))
+
+    # 현 시점 JB — 마지막 산출 가능한 월
+    current = compute_latest_jb(monthly)
+    if current is None:
+        # 폴백: 모든 월 데이터가 부족하면 KB 단일값
+        from services.jb_fair_price import JBComputeResult
+        current = JBComputeResult(
+            jb_fair_price=kb_data.estimated,
+            weights={"kb": 1.0, "molit": 0.0, "naver": 0.0},
+            sources={"kb": kb_data.estimated, "molit": 0, "naver": 0},
+            confidence={"kb": 1.0, "molit": 0.0, "naver": 0.0},
+            notes=["월별 집계 표본 부족 → KB 단일값 사용"],
+        )
+
+    # 예측 — OLS 로그-선형 회귀
+    forecast_raw = project_jb_forecast(jb_history_tuples, horizon_months=12)
+    forecast_schema: list[ForecastPointSchema] = []
+    if jb_history_tuples and forecast_raw:
+        last_y, last_m, _ = jb_history_tuples[-1]
+        for fp in forecast_raw:
+            y, m = last_y, last_m + fp.month
+            while m > 12:
+                m -= 12
+                y += 1
+            forecast_schema.append(ForecastPointSchema(
+                date=date(y, m, 1).strftime("%Y-%m-%d"),
+                predicted=fp.predicted,
+                lower=fp.lower,
+                upper=fp.upper,
+            ))
 
     return CreditData(
         kb_price=kb_data,
         molit_transactions=molit_data,
         naver_listings=naver_data,
-        jb_fair_price=jb_result.jb_fair_price,
+        jb_fair_price=current.jb_fair_price,
         jb_detail=JBFairPriceDetail(
-            fair_price=jb_result.jb_fair_price,
-            weights=jb_result.weights,
-            sources=jb_result.sources,
-            confidence=jb_result.confidence,
-            notes=jb_result.notes,
-            history=jb_history,
+            fair_price=current.jb_fair_price,
+            weights=current.weights,
+            sources=current.sources,
+            confidence=current.confidence,
+            notes=current.notes,
+            history=jb_history_points,
             forecast=forecast_schema,
         ),
     )
@@ -352,6 +403,8 @@ def _build_kb_price(
         PricePoint(
             date=p.as_of_date.strftime("%Y-%m-%d"),
             price=p.general_price or 0,
+            low=p.low_avg_price,
+            high=p.high_avg_price,
         )
         for p in prices
         if p.general_price is not None
@@ -431,17 +484,24 @@ def _build_molit_transactions(
 def _build_naver_listings(
     db: Session,
     complex_id: int,
+    exclusive_m2: float,
     cutoff: date,
 ) -> Optional[NaverListings]:
     """Listing 테이블에서 현재 매물 및 호가 추이를 조회한다.
 
     history 는 매물의 등록일(posted_at) 기준 산점도. 매물별 1포인트.
+    면적은 transactions 와 동일하게 ±5㎡ 톨러런스로 필터.
     """
+    m2_tolerance = 5.0
+    m2_lo, m2_hi = exclusive_m2 - m2_tolerance, exclusive_m2 + m2_tolerance
+
     active_listings = (
         db.query(Listing)
         .filter(
             Listing.complex_id == complex_id,
             Listing.status == ListingStatus.ACTIVE,
+            Listing.trade_type == "매매",
+            Listing.exclusive_m2.between(m2_lo, m2_hi),
         )
         .all()
     )
@@ -450,6 +510,8 @@ def _build_naver_listings(
         db.query(Listing)
         .filter(
             Listing.complex_id == complex_id,
+            Listing.trade_type == "매매",
+            Listing.exclusive_m2.between(m2_lo, m2_hi),
             # posted_at 우선 — 없으면 fetched_at 으로 fallback
             (Listing.posted_at >= cutoff) | (Listing.fetched_at >= cutoff),
         )
@@ -743,12 +805,8 @@ def build_real_price_per_pyeong(
 ) -> Optional[PricePerPyeongTrend]:
     """단지/읍면동/시군구 평단가 추이 — 실거래가 기반 12개월 월별.
 
-    ─ 단지: target_complex 거래 중 ±5m² 평균
-    ─ 읍면동: 같은 dong_code(10자리) 단지들의 ±5m² 거래 평균
-    ─ 시군구: 같은 region_code(5자리) 단지들의 ±5m² 거래 평균
-
-    각 월 평균 거래가를 평형(평)으로 나눈 만원 단위.
-    데이터 결측 월은 직전 값 carry-forward.
+    세 시리즈 모두 면적 ±5㎡ 톨러런스로 한정해 같은 평형 대역끼리 비교.
+    결측 월은 직전 값 carry-forward (그 달 거래 0건이면 전월 평단가 유지).
     """
     pyeong = target_area.pyeong or (target_area.exclusive_m2 / 3.305785 if target_area.exclusive_m2 else 0)
     if pyeong <= 0 or not target_area.exclusive_m2:
@@ -768,35 +826,59 @@ def build_real_price_per_pyeong(
         cursor = (cursor - timedelta(days=1)).replace(day=1)
     month_keys.reverse()
 
-    def _avg_ppp_for_scope(scope_filter, restrict_m2: bool) -> dict[str, int]:
-        """월별 평단가 dict {YYYY-MM: ppp(만원/평)}.
-        restrict_m2=True 면 ±5m² (단지용), False 면 모든 평형 (동/구 평균)."""
-        q = (
+    def _avg_ppp_for_scope(scope_filter) -> dict[str, int]:
+        """월별 평단가 dict {YYYY-MM: ppp(만원/평)} — 단지 단위 1표 가중치 균등화.
+
+        한 달에 한 단지에서 거래가 몰리거나, 평단가 양극단인 두 단지로 나뉘면
+        거래 단위 평균은 한쪽으로 끌려간다. 따라서:
+          1) (월, 단지) 별로 거래 단위 IQR 1.5× 적용 후 단지-월 평단가 산출
+          2) 그 단지-월 평단가들을 다시 월 단위로 IQR 1.5× → 산술평균
+        단지 scope 처럼 단지가 1개면 1단계만 의미 있음 (2단계는 1값 그대로).
+        """
+        rows = (
             db.query(
                 func.to_char(Transaction.contract_date, 'YYYY-MM').label('ym'),
-                func.avg(Transaction.price / Transaction.exclusive_m2).label('avg_won_per_m2'),
+                Transaction.complex_id.label('cid'),
+                (Transaction.price / Transaction.exclusive_m2).label('won_per_m2'),
             )
             .join(Complex, Transaction.complex_id == Complex.id)
             .filter(scope_filter)
             .filter(Transaction.is_cancelled == False)
-            .filter(Transaction.exclusive_m2 > 0)
+            .filter(Transaction.exclusive_m2.between(m2_lo, m2_hi))
             .filter(Transaction.contract_date >= month_keys[0][1])
+            .all()
         )
-        if restrict_m2:
-            q = q.filter(Transaction.exclusive_m2.between(m2_lo, m2_hi))
-        rows = q.group_by('ym').all()
-        return {
-            r.ym: int(float(r.avg_won_per_m2) * 3.305785 / 10000)
-            for r in rows if r.avg_won_per_m2
-        }
+        # (ym, complex_id) → [ppm, ...]
+        by_complex_month: dict[tuple[str, int], list[float]] = {}
+        for r in rows:
+            if r.won_per_m2 is None:
+                continue
+            by_complex_month.setdefault((r.ym, r.cid), []).append(float(r.won_per_m2))
 
-    complex_dict = _avg_ppp_for_scope(Complex.id == target_complex.id, restrict_m2=True)
+        # 단지-월 평단가 (단지 내부 거래 IQR 제거 후 평균)
+        complex_month_ppm: dict[str, list[float]] = {}
+        for (ym, _cid), vals in by_complex_month.items():
+            kept = _iqr_filter(vals)
+            if not kept:
+                continue
+            complex_month_ppm.setdefault(ym, []).append(sum(kept) / len(kept))
+
+        out: dict[str, int] = {}
+        for ym, complex_avgs in complex_month_ppm.items():
+            kept = _iqr_filter(complex_avgs)
+            if not kept:
+                continue
+            avg_won_per_m2 = sum(kept) / len(kept)
+            out[ym] = int(avg_won_per_m2 * 3.305785 / 10000)
+        return out
+
+    complex_dict = _avg_ppp_for_scope(Complex.id == target_complex.id)
     dong_dict = (
-        _avg_ppp_for_scope(Complex.dong_code == target_complex.dong_code, restrict_m2=False)
+        _avg_ppp_for_scope(Complex.dong_code == target_complex.dong_code)
         if target_complex.dong_code else {}
     )
     sigungu_dict = (
-        _avg_ppp_for_scope(Complex.region_code.like(f"{target_complex.region_code[:5]}%"), restrict_m2=False)
+        _avg_ppp_for_scope(Complex.region_code.like(f"{target_complex.region_code[:5]}%"))
         if target_complex.region_code else {}
     )
 

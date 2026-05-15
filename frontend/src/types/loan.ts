@@ -81,16 +81,16 @@ export interface KbPrice {
   trend: string;
 }
 
-// 국토교통부 실거래가
+// 국토교통부 실거래가. 수집 데이터 없으면 recent_price=null.
 export interface MolitTransactions {
-  recent_price: number;
-  transaction_date: string;
+  recent_price: number | null;
+  transaction_date: string | null;
   trend: string;
 }
 
-// 네이버페이 부동산 매매호가
+// 네이버페이 부동산 매매호가. 수집 데이터 없으면 avg_asking=null.
 export interface NaverListings {
-  avg_asking: number;
+  avg_asking: number | null;
   listing_count: number;
   trend: string;
 }
@@ -147,10 +147,12 @@ export interface LoanApplication {
   decided_at?: string | null;
 }
 
-// KB 시세 이력 포인트
+// KB 시세 이력 포인트. low/high 는 KB history 에만 채워짐.
 export interface PriceHistoryPoint {
   date: string;
   price: number;
+  low?: number | null;
+  high?: number | null;
 }
 
 // KB 시세 (이력 포함)

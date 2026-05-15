@@ -20,7 +20,7 @@ router = APIRouter(
 )
 
 
-def _to_out(row: RegistryRequest) -> RegistryRequestOut:
+def _to_out(row: RegistryRequest, include_markdown: bool = False) -> RegistryRequestOut:
     pdf_url = None
     if row.status == "completed" and row.pdf_path and row.ic_id:
         pdf_url = f"/v1/registry/{row.ic_id}/pdf"
@@ -33,6 +33,7 @@ def _to_out(row: RegistryRequest) -> RegistryRequestOut:
         cost=row.cost or 0,
         cached=cached,
         error_message=row.error_message,
+        markdown=row.markdown if include_markdown else None,
     )
 
 
@@ -65,6 +66,37 @@ def get_registry(ic_id: int, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(404, "not found")
     return _to_out(row)
+
+
+@router.get("/{ic_id}/markdown")
+def get_registry_markdown(ic_id: int, db: Session = Depends(get_db)):
+    """MinerU 가 변환한 markdown 반환. PDF 발급 완료 후에만 사용 가능.
+
+    markdown 컬럼이 비어있고 PDF 가 disk 에 남아있으면 lazy 로 변환·저장 후 반환.
+    이를 통해 markdown 캐싱 도입 *이전에* 발급된 row 도 첫 조회 시 자동 backfill 된다.
+    """
+    q = select(RegistryRequest).where(RegistryRequest.ic_id == ic_id).limit(1)
+    row = db.execute(q).scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, "not found")
+    if row.status != "completed":
+        raise HTTPException(
+            status_code=202,
+            detail={"status": row.status, "error_message": row.error_message},
+        )
+    if not row.markdown:
+        # lazy backfill: 디스크의 PDF 를 그 자리에서 MinerU 로 변환
+        from .service import _convert_to_markdown
+        if not row.pdf_path or not os.path.exists(row.pdf_path):
+            raise HTTPException(410, {"code": "no_pdf", "message": "PDF 파일 없음"})
+        with open(row.pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+        md = _convert_to_markdown(pdf_bytes)
+        if not md:
+            raise HTTPException(404, {"code": "no_markdown", "message": "markdown 변환 실패"})
+        row.markdown = md
+        db.commit()
+    return {"ic_id": ic_id, "markdown": row.markdown}
 
 
 @router.get("/{ic_id}/pdf")

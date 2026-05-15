@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   ResponsiveContainer,
-  LineChart,
   Line,
   Area,
   ComposedChart,
@@ -26,55 +25,102 @@ interface ChartDataPoint {
   dateLabel: string;
   ts: number;
   price: number;
+  low?: number;
+  high?: number;
+  range?: [number, number];  // KB 차트 상하한 Area 용
 }
 
-interface JbDataPoint {
+interface TooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload: ChartDataPoint }>;
+}
+
+interface JbTooltipPayload {
   date: string;
-  dateLabel: string;
-  jbPrice?: number;
-  predictedPrice?: number;
-  type: string;
+  history?: number;
+  predicted?: number;
+  lower?: number;
+  upper?: number;
 }
 
-export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProps) {
-  if (!data) return null;
+interface JbTooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload: JbTooltipPayload }>;
+}
 
-  const formatPrice = (value: number): string => {
-    return `${(value / 100000000).toFixed(1)}억`;
-  };
+const JbTooltip = ({ active, payload }: JbTooltipProps) => {
+  if (!active || !payload || !payload.length) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="chart-tooltip">
+      <p className="tooltip-label">{p.date}</p>
+      {p.history != null && <p className="tooltip-value" style={{ color: '#FF8C00' }}>실측 JB: {formatPrice(p.history)}</p>}
+      {p.predicted != null && <p className="tooltip-value" style={{ color: '#FF8C00' }}>예측: {formatPrice(p.predicted)}</p>}
+      {p.lower != null && p.upper != null && (
+        <p className="tooltip-value" style={{ color: '#888', fontSize: 11 }}>
+          80% CI: {formatPrice(p.lower)} ~ {formatPrice(p.upper)}
+        </p>
+      )}
+    </div>
+  );
+};
+
+const formatPrice = (value: number): string => `${(value / 100000000).toFixed(1)}억`;
+
+const CustomTooltip = ({ active, payload }: TooltipProps) => {
+  if (!active || !payload || !payload.length) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="chart-tooltip">
+      <p className="tooltip-label">{p.date}</p>
+      <p className="tooltip-value">{formatPrice(p.price)}</p>
+      {p.low != null && p.high != null && (
+        <p className="tooltip-value" style={{ color: '#888', fontSize: 11 }}>
+          하한 {formatPrice(p.low)} · 상한 {formatPrice(p.high)}
+        </p>
+      )}
+    </div>
+  );
+};
+
+export default function PriceCharts({ data }: PriceChartsProps) {
+  if (!data) return null;
 
   const formatDate = (dateStr: string): string => {
     const date = new Date(dateStr);
     return `${date.getMonth() + 1}/${date.getDate()}`;
   };
 
-  const formatYearMonth = (dateStr: string): string => {
-    const date = new Date(dateStr);
-    return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}`;
-  };
-
-  // 3개월 윈도우 (오늘 기준) — X축 도메인은 데이터 유무와 무관하게 항상 [start, today]
+  // 6개월 윈도우 (오늘 기준) — X축 도메인은 데이터 유무와 무관하게 항상 [start, today]
   const _today = new Date();
   _today.setHours(23, 59, 59, 0);
-  const _threeMonthsAgo = new Date(_today);
-  _threeMonthsAgo.setMonth(_threeMonthsAgo.getMonth() - 3);
-  _threeMonthsAgo.setHours(0, 0, 0, 0);
-  const startTs = _threeMonthsAgo.getTime();
+  const _windowStart = new Date(_today);
+  _windowStart.setMonth(_windowStart.getMonth() - 6);
+  _windowStart.setHours(0, 0, 0, 0);
+  const startTs = _windowStart.getTime();
   const endTs = _today.getTime();
   const _inWindow = (d: string) => {
     const t = new Date(d).getTime();
     return t >= startTs && t <= endTs;
   };
-  const _toPoint = (p: { date: string; price: number }) => ({
-    date: p.date,
-    dateLabel: formatDate(p.date),
-    ts: new Date(p.date).getTime(),
-    price: p.price,
-  });
+  const _toPoint = (p: { date: string; price: number; low?: number | null; high?: number | null }): ChartDataPoint => {
+    const point: ChartDataPoint = {
+      date: p.date,
+      dateLabel: formatDate(p.date),
+      ts: new Date(p.date).getTime(),
+      price: p.price,
+    };
+    if (p.low != null && p.high != null) {
+      point.low = p.low;
+      point.high = p.high;
+      point.range = [p.low, p.high];
+    }
+    return point;
+  };
   // X축 tick: 매월 1일
   const monthlyTicks: number[] = [];
   {
-    const t = new Date(_threeMonthsAgo);
+    const t = new Date(_windowStart);
     t.setDate(1);
     while (t.getTime() <= endTs) {
       if (t.getTime() >= startTs) monthlyTicks.push(t.getTime());
@@ -134,7 +180,7 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
   const jbEndTs = jbEndDate.getTime();
   const jbXTicks: number[] = [];
   {
-    const t = new Date(_threeMonthsAgo);
+    const t = new Date(_windowStart);
     t.setDate(1);
     while (t.getTime() <= jbEndTs) {
       if (t.getTime() >= startTs) jbXTicks.push(t.getTime());
@@ -143,9 +189,11 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
     if (!jbXTicks.includes(endTs)) jbXTicks.push(endTs);
   }
 
-  // 3개 차트 공통 Y축 범위 (KB, 실거래가, 매매호가) — 데이터 없을 때 가드
+  // 3개 차트 공통 Y축 범위 (KB, 실거래가, 매매호가) — 데이터 없을 때 가드.
+  // KB 상하한 표시 위해 low/high 도 포함.
   const allPrices = [
     ...kbData.map(d => d.price),
+    ...kbData.flatMap(d => (d.low != null && d.high != null ? [d.low, d.high] : [])),
     ...molitData.map(d => d.price),
     ...naverData.map(d => d.price),
   ].filter(v => v > 0);
@@ -169,26 +217,13 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
   const jbYMax = Math.ceil((jbMax + jbMargin) / 100000000) * 100000000;
 
 
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const dataPoint = payload[0].payload;
-      return (
-        <div className="chart-tooltip">
-          <p className="tooltip-label">{dataPoint.date}</p>
-          <p className="tooltip-value">{formatPrice(dataPoint.price)}</p>
-        </div>
-      );
-    }
-    return null;
-  };
-
   return (
     <>
       <div className="price-charts-grid">
         <div className="chart-box">
           <h4>KB 시세 추이</h4>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={kbData}>
+            <ComposedChart data={kbData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
               <XAxis
                 dataKey="ts"
@@ -206,6 +241,16 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
                 width={60}
               />
               <Tooltip content={<CustomTooltip />} />
+              <Area
+                type="monotone"
+                dataKey="range"
+                stroke="none"
+                fill="#006FBD"
+                fillOpacity={0.12}
+                name="하한~상한"
+                connectNulls={false}
+                isAnimationActive={false}
+              />
               <Line
                 type="monotone"
                 dataKey="price"
@@ -214,7 +259,7 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
                 dot={{ r: 3, fill: '#006FBD' }}
                 name="KB시세"
               />
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
 
@@ -281,17 +326,47 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
         </div>
       </div>
 
-      {/* JB 적정시세 추이 + 향후 3개월 예측 (1단계: 동적 가중치 + IQR + 90% 신뢰구간) */}
+      {/* JB 적정시세 추이 + 향후 3개월 예측 (1단계: 동적 가중치 + IQR + 80% 신뢰구간) */}
       <div className="chart-box jb-fair-price-chart">
         <div className="jb-chart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <h4>JB 적정 시세 추이 · 3개월 예측</h4>
           <div style={{ fontSize: 11, color: '#666' }}>
+            <span style={{ marginRight: 8, color: '#444', fontWeight: 600 }}>수행달 가중치</span>
             <span style={{ marginRight: 12 }}>KB <strong style={{ color: '#006FBD' }}>{Math.round((jbWeights.kb || 0) * 100)}%</strong></span>
             <span style={{ marginRight: 12 }}>실거래 <strong style={{ color: '#7DCCE5' }}>{Math.round((jbWeights.molit || 0) * 100)}%</strong></span>
             <span style={{ marginRight: 12 }}>호가 <strong style={{ color: '#051C48' }}>{Math.round((jbWeights.naver || 0) * 100)}%</strong></span>
             <span>현재 <strong style={{ color: '#FF8C00' }}>{formatPrice(latestJbPrice)}</strong></span>
           </div>
         </div>
+        {(() => {
+          const last = forecastSrc[forecastSrc.length - 1];
+          if (!last || !latestJbPrice) return null;
+          const fmtSigned = (n: number) => {
+            const abs = Math.abs(n);
+            const eok = abs / 100000000;
+            const sign = n >= 0 ? '+' : '-';
+            return `${sign}${eok.toFixed(2)}억`;
+          };
+          const pct = (n: number) => `${n >= 0 ? '+' : ''}${(n * 100).toFixed(1)}%`;
+          const dCenter = last.predicted - latestJbPrice;
+          const dLower = last.lower - latestJbPrice;
+          const dUpper = last.upper - latestJbPrice;
+          const rCenter = dCenter / latestJbPrice;
+          const color = dCenter >= 0 ? '#E74C3C' : '#3498DB';
+          return (
+            <div style={{
+              fontSize: 11, color: '#555', marginTop: 4, marginBottom: 6,
+              display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center',
+            }}>
+              <span>3개월 후 예상</span>
+              <span>중심선 <strong style={{ color }}>{pct(rCenter)} ({fmtSigned(dCenter)})</strong></span>
+              <span style={{ color: '#888' }}>
+                80% 범위 <strong>{pct(dLower / latestJbPrice)} ~ {pct(dUpper / latestJbPrice)}</strong>
+                <span style={{ marginLeft: 4 }}>({fmtSigned(dLower)} ~ {fmtSigned(dUpper)})</span>
+              </span>
+            </div>
+          );
+        })()}
         <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={jbCombined}>
             <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
@@ -310,48 +385,33 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
               tick={{ fontSize: 10 }}
               width={65}
             />
-            <Tooltip
-              content={({ active, payload }: any) => {
-                if (!active || !payload || !payload.length) return null;
-                const p = payload[0].payload;
-                return (
-                  <div className="chart-tooltip">
-                    <p className="tooltip-label">{p.date}</p>
-                    {p.history && <p className="tooltip-value" style={{ color: '#FF8C00' }}>실측 JB: {formatPrice(p.history)}</p>}
-                    {p.predicted && <p className="tooltip-value" style={{ color: '#FF8C00' }}>예측: {formatPrice(p.predicted)}</p>}
-                    {p.lower && p.upper && (
-                      <p className="tooltip-value" style={{ color: '#888', fontSize: 11 }}>
-                        90% CI: {formatPrice(p.lower)} ~ {formatPrice(p.upper)}
-                      </p>
-                    )}
-                  </div>
-                );
-              }}
-            />
+            <Tooltip content={<JbTooltip />} />
             <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: 11, paddingBottom: 4 }} />
-            {/* 신뢰구간 Area (반투명) */}
+            {/* 신뢰구간 Area (옅은 주황 fill) — legend rect */}
             <Area
               type="monotone"
               dataKey="range"
               stroke="none"
-              fill="#FF8C00"
-              fillOpacity={0.15}
-              name="90% 신뢰구간"
+              fill="#FFD9A8"
+              fillOpacity={0.6}
+              name="80% 신뢰구간"
+              legendType="rect"
               connectNulls={false}
               isAnimationActive={false}
             />
-            {/* 실측 라인 */}
+            {/* 실측: 오렌지 실선 + 채워진 동그라미 — legend circle */}
             <Line
               type="monotone"
               dataKey="history"
               stroke="#FF8C00"
               strokeWidth={2.5}
-              dot={{ r: 4, fill: '#FF8C00' }}
+              dot={{ r: 4, fill: '#FF8C00', stroke: '#FF8C00' }}
               name="실측"
+              legendType="circle"
               connectNulls={false}
               isAnimationActive={false}
             />
-            {/* 예측 라인 (점선) */}
+            {/* 예측: 오렌지 점선 + 빈 동그라미 — legend plainline */}
             <Line
               type="monotone"
               dataKey="predicted"
@@ -360,18 +420,13 @@ export default function PriceCharts({ data, loanDuration = 12 }: PriceChartsProp
               strokeDasharray="6 4"
               dot={{ r: 3, fill: '#FFF', stroke: '#FF8C00', strokeWidth: 2 }}
               name="예측"
+              legendType="plainline"
               connectNulls={false}
               isAnimationActive={false}
             />
-            {/* 오늘 기준선 */}
-            <ReferenceLine x={endTs} stroke="#999" strokeDasharray="3 3" label={{ value: '오늘', fill: '#666', fontSize: 10, position: 'top' }} />
+            <ReferenceLine x={endTs} stroke="#999" strokeDasharray="3 3" />
           </ComposedChart>
         </ResponsiveContainer>
-        {data.jb_detail?.notes && data.jb_detail.notes.length > 0 && (
-          <div style={{ fontSize: 10, color: '#888', marginTop: 6 }}>
-            {data.jb_detail.notes.join(' · ')}
-          </div>
-        )}
       </div>
     </>
   );

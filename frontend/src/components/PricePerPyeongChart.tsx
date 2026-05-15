@@ -39,17 +39,20 @@ export default function PricePerPyeongChart({ data }: PricePerPyeongChartProps) 
   return (
     <div className="info-card">
       <h3>단지 평단가 vs 동/구 평균 추이</h3>
+      <div style={{ fontSize: 11, color: '#6B7785', marginBottom: 8 }}>
+        같은 평형 대역(전용면적 ±5㎡) 실거래만 집계한 월평균 평단가입니다. 그 달 거래 0건이면 직전 값 유지.
+      </div>
       <div className="pyeong-chart-labels" style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         <span className="pyeong-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#006FBD' }} />
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#7DCCE5' }} />
           {data.complex_name} 평단가
         </span>
         <span className="pyeong-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#FF8C00' }} />
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#006FBD' }} />
           {data.dong_name} 평균
         </span>
         <span className="pyeong-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#20c997' }} />
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#051C48' }} />
           {data.sigungu_name} 평균
         </span>
       </div>
@@ -67,25 +70,25 @@ export default function PricePerPyeongChart({ data }: PricePerPyeongChartProps) 
           <Line
             type="monotone"
             dataKey="complex"
-            stroke="#006FBD"
+            stroke="#7DCCE5"
             strokeWidth={2.5}
-            dot={{ r: 4, fill: '#006FBD' }}
+            dot={{ r: 4, fill: '#7DCCE5' }}
             name={`${data.complex_name} 평단가`}
           />
           <Line
             type="monotone"
             dataKey="dong"
-            stroke="#FF8C00"
+            stroke="#006FBD"
             strokeWidth={2}
-            dot={{ r: 4, fill: '#FF8C00' }}
+            dot={{ r: 4, fill: '#006FBD' }}
             name={`${data.dong_name} 평균`}
           />
           <Line
             type="monotone"
             dataKey="sigungu"
-            stroke="#20c997"
+            stroke="#051C48"
             strokeWidth={2}
-            dot={{ r: 4, fill: '#20c997' }}
+            dot={{ r: 4, fill: '#051C48' }}
             name={`${data.sigungu_name} 평균`}
           />
         </LineChart>

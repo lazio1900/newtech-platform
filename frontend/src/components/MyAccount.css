@@ -1,0 +1,194 @@
+.my-account {
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ----- 카드 공통 ----- */
+.ma-card {
+  background: #fff;
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.ma-card-header {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #F3F4F6;
+}
+.ma-card-header h3 {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1F2937;
+}
+.ma-card-header p {
+  margin: 0;
+  font-size: 12px;
+  color: #6B7785;
+}
+
+.ma-card-footer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #F3F4F6;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+/* ----- 헤더 카드 (아바타 + 이름 + role) ----- */
+.ma-header-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.ma-avatar {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #006FBD 0%, #0099E5 100%);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.ma-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ma-display-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.ma-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ma-id {
+  font-size: 13px;
+  color: #6B7785;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.ma-role-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+.ma-role-pill[data-role="admin"] {
+  background: #FEE2E2; color: #991B1B; border-color: #FCA5A5;
+}
+.ma-role-pill[data-role="auditor"] {
+  background: #DBEAFE; color: #1E40AF; border-color: #93C5FD;
+}
+.ma-role-pill[data-role="customer"] {
+  background: #F3F4F6; color: #374151; border-color: #D1D5DB;
+}
+
+/* ----- 폼 ----- */
+.ma-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 24px;
+}
+.ma-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ma-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ma-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  letter-spacing: 0.01em;
+}
+
+.ma-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid #D1D5DB;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #111827;
+  background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+}
+.ma-input:focus {
+  outline: none;
+  border-color: #006FBD;
+  box-shadow: 0 0 0 3px rgba(0, 111, 189, 0.15);
+}
+.ma-input:disabled {
+  background: #F9FAFB;
+  color: #6B7785;
+  cursor: not-allowed;
+}
+.ma-input::placeholder {
+  color: #9CA3AF;
+}
+
+/* ----- 버튼 ----- */
+.ma-btn-primary {
+  padding: 9px 18px;
+  background: #006FBD;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ma-btn-primary:hover:not(:disabled) {
+  background: #005A99;
+}
+.ma-btn-primary:disabled {
+  background: #9CA3AF;
+  cursor: not-allowed;
+}
+
+/* ----- 메시지 ----- */
+.ma-msg {
+  font-size: 13px;
+  font-weight: 500;
+}
+.ma-msg.ok {
+  color: #065F46;
+}
+.ma-msg.err {
+  color: #991B1B;
+}
+
+/* 좁은 화면에서 grid → stack */
+@media (max-width: 640px) {
+  .ma-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

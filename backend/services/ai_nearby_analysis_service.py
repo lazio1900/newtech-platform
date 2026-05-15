@@ -155,8 +155,10 @@ def generate_or_get_cached(
 
     try:
         from services.llm_service import LLMClient
+        from services.prompt_registry import get_prompt
         client = LLMClient()
-        result = client.complete(prompt, system=SYSTEM_PROMPT, json_mode=True)
+        system_prompt = get_prompt(db, "nearby", "system", SYSTEM_PROMPT)
+        result = client.complete(prompt, system=system_prompt, json_mode=True)
         raw = (result.get("text") or "").strip()
         if not raw:
             return "[종합 의견] AI 분석 결과가 비어있습니다."

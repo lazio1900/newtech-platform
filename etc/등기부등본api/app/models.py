@@ -36,5 +36,6 @@ class RegistryRequest(Base):
     requester_id = Column(Text)
     listing_id = Column(Text)
     error_message = Column(Text)
+    markdown = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True))

@@ -83,14 +83,14 @@ export default function MonitoringTab() {
     // 정렬
     if (sortKey) {
       result.sort((a, b) => {
-        let aVal: any = (a as any)[sortKey];
-        let bVal: any = (b as any)[sortKey];
-        if (typeof aVal === 'string') {
+        let aVal = (a as unknown as Record<string, unknown>)[sortKey];
+        let bVal = (b as unknown as Record<string, unknown>)[sortKey];
+        if (typeof aVal === 'string' && typeof bVal === 'string') {
           aVal = aVal.toLowerCase();
           bVal = bVal.toLowerCase();
         }
-        if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
-        if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+        if ((aVal as number | string) < (bVal as number | string)) return sortDir === 'asc' ? -1 : 1;
+        if ((aVal as number | string) > (bVal as number | string)) return sortDir === 'asc' ? 1 : -1;
         return 0;
       });
     }
@@ -409,7 +409,10 @@ export default function MonitoringTab() {
                     <PriceCharts data={detailData.credit_data} />
                   </div>
                   <div className="layout-row-full">
-                    <AIMarketAnalysis analysis={detailData.ai_analysis.market_analysis} />
+                    <AIMarketAnalysis
+                      analysis={detailData.ai_analysis.market_analysis}
+                      jbDetail={detailData.credit_data.jb_detail}
+                    />
                   </div>
                 </div>
               )}

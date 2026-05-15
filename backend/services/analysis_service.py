@@ -89,6 +89,8 @@ def perform_full_analysis(
     area_id: Optional[int] = None,
     complex_name: Optional[str] = None,
     application_id: Optional[str] = None,
+    registry_ic_id: Optional[int] = None,
+    interest_rate: Optional[float] = None,
 ) -> AnalysisResponse:
     """전체 분석 수행 - 실 수집 데이터 우선, 없으면 더미 폴백.
 
@@ -127,17 +129,21 @@ def perform_full_analysis(
     guarantor_info = generate_guarantor_info()
     property_rights_info = generate_property_rights_info(property_address)
 
-    # 1-0. 등기부등본 LLM 권리 분석 — 신청건에 registry_ic_id 가 있으면 PDF 추출 + LLM
+    # 1-0. 등기부등본 LLM 권리 분석 — application_id 의 registry_ic_id 또는 명시적 registry_ic_id 사용
     rights_llm: dict = {}
-    registry_ic_id_for_app = None
-    if application_id and db is not None:
+    registry_ic_id_for_app: Optional[int] = None
+    if db is not None:
         try:
-            from models.loan import LoanApplication
-            la = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
-            if la and la.registry_ic_id:
-                registry_ic_id_for_app = la.registry_ic_id
+            ic_id: Optional[int] = registry_ic_id  # 직접조회는 frontend 가 명시 전달
+            if application_id and not ic_id:
+                from models.loan import LoanApplication
+                la = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
+                if la and la.registry_ic_id:
+                    ic_id = la.registry_ic_id
+            if ic_id:
+                registry_ic_id_for_app = ic_id
                 from services.ai_rights_analysis_service import generate_or_get_cached as gen_rights
-                rights_llm = gen_rights(db, application_id, la.registry_ic_id)
+                rights_llm = gen_rights(db, application_id, ic_id)
         except Exception as e:
             logger.warning(f"AI 권리 분석 실패: {e}")
     # rights_llm 결과로 property_rights_info 의 표 4종 + 합계 채움 (있으면)
@@ -266,10 +272,11 @@ def perform_full_analysis(
         parallel_tasks["property"] = _property
 
     if real_data and real_data.get("credit_data"):
-        def _market(local_db, _credit=credit_data, _nb=nearby_trends, _amt=loan_amount, _tp=total_prior, _py=target_pyeong):
+        def _market(local_db, _credit=credit_data, _nb=nearby_trends, _amt=loan_amount, _tp=total_prior, _py=target_pyeong, _ir=interest_rate):
             from services.ai_market_analysis_service import generate_or_get_cached as gm
             return gm(db=local_db, application_id=application_id,
-                      credit=_credit, nearby=_nb, loan_amount=_amt, total_prior=_tp, pyeong=_py)
+                      credit=_credit, nearby=_nb, loan_amount=_amt, total_prior=_tp, pyeong=_py,
+                      interest_rate=_ir)
         parallel_tasks["market"] = _market
 
     if real_data and nearby_trends and nearby_trends.similar_properties:

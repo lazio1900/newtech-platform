@@ -5,6 +5,8 @@ import { complexesApi } from '../api/complexes';
 import { regionsApi, RegionItem, DongItem } from '../api/regions';
 import { registryApi } from '../api/registry';
 import type { Area, Complex } from '@/types/complex';
+import Settings from './Settings';
+import UserProfileMenu from './UserProfileMenu';
 import './CustomerDashboard.css';
 
 interface CustomerDashboardProps {
@@ -23,7 +25,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default function CustomerDashboard({ user, onLogout }: CustomerDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'apply' | 'history'>('apply');
+  const [activeTab, setActiveTab] = useState<'apply' | 'history' | 'settings'>('apply');
 
   // 시도/시군구/읍면동
   const [sidoList, setSidoList] = useState<RegionItem[]>([]);
@@ -55,11 +57,30 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
     status?: string; ic_id?: number | null; pdf_url?: string | null;
     cached?: boolean; error?: string | null;
   } | null>(null);
+  // 등기부 표제부에서 추출된 전용면적 (자동 평형 제안용)
+  const [registryExclusiveM2, setRegistryExclusiveM2] = useState<number | null>(null);
+
+  /** 등기부 발급 완료 후 표제부 면적 추출 + 가장 가까운 평형 자동 선택. */
+  const applyAreaSuggestion = async (icId: number, complexId: number) => {
+    try {
+      const suggestion = await registryApi.getAreaSuggestion(icId, complexId);
+      if (suggestion.exclusive_m2 != null) {
+        setRegistryExclusiveM2(suggestion.exclusive_m2);
+      }
+      if (suggestion.suggested_area_id != null) {
+        const next = areas.find((a) => a.id === suggestion.suggested_area_id);
+        if (next) setSelectedArea(next);
+      }
+    } catch {
+      // 추출 실패는 silent — 사용자가 직접 평형 선택 가능
+    }
+  };
 
   const handleFetchRegistry = async () => {
     if (!selectedComplex || !dong.trim() || !ho.trim()) return;
     setRegistryLoading(true);
     setRegistryResult(null);
+    setRegistryExclusiveM2(null);
     try {
       // backend 가 complex_id 기반으로 4단계 후보 chain (지번/도로명 × 단지명 유무) 으로 매칭 시도.
       // payload.address 는 후보가 못 만들어진 예외 경로의 fallback 용도.
@@ -81,6 +102,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
           pdf_url: registryApi.pdfUrl(res.ic_id),
           cached: res.cached, error: res.error_message,
         });
+        applyAreaSuggestion(res.ic_id, selectedComplex.id);
         return;
       }
 
@@ -108,6 +130,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
               pdf_url: registryApi.pdfUrl(icId),
               cached: cur.cached, error: null,
             });
+            applyAreaSuggestion(icId, selectedComplex.id);
             return;
           }
           if (cur.status === 'failed') {
@@ -249,6 +272,8 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
     setSelectedArea(null);
     setDong('');
     setHo('');
+    setRegistryResult(null);
+    setRegistryExclusiveM2(null);
   };
 
   const runComplexSearch = async (query: string) => {
@@ -390,8 +415,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
           <h1>대출 신청</h1>
         </div>
         <div className="header-right">
-          <span className="user-info">{user.company_name} ({user.ceo_name})</span>
-          <button className="logout-btn" onClick={onLogout}>로그아웃</button>
+          {/* 사용자 정보 / 로그아웃은 좌측 사이드바 하단 사용자 메뉴로 이동 */}
         </div>
       </header>
 
@@ -401,6 +425,16 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                   onClick={() => setActiveTab('apply')}>대출 신청</button>
           <button className={`sidebar-btn ${activeTab === 'history' ? 'active' : ''}`}
                   onClick={() => setActiveTab('history')}>신청 내역</button>
+
+          {/* 하단 — 사용자 프로필 + 드롭다운. customer 는 admin 패널 미노출 */}
+          <div className="sidebar-bottom">
+            <UserProfileMenu
+              user={user}
+              onOpenAccount={() => setActiveTab('settings')}
+              onOpenAdminPanel={() => { /* customer 는 admin 아니라 호출 안 됨 */ }}
+              onLogout={onLogout}
+            />
+          </div>
         </nav>
 
         <div className="dashboard-content">
@@ -625,44 +659,6 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                     </div>
                   )}
 
-                  {/* 평형 — DB에 등록된 areas 중에서만 선택 */}
-                  <div className="apply-field">
-                    <label>평형 <span style={{ color: '#EF5350' }}>*</span></label>
-                    {areas.length === 0 ? (
-                      <div className="field-hint">
-                        <span className="match-status warning">
-                          ⚠ 이 단지의 평형 정보가 아직 수집되지 않았습니다. 다른 단지를 선택해주세요.
-                        </span>
-                      </div>
-                    ) : (
-                      <>
-                        <select
-                          value={selectedArea?.id ?? ''}
-                          onChange={(e) => {
-                            const id = parseInt(e.target.value, 10);
-                            setSelectedArea(areas.find((a) => a.id === id) ?? null);
-                          }}
-                          disabled={submitting}
-                          className="duration-select"
-                        >
-                          <option value="">선택하세요</option>
-                          {areas.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              전용 {a.exclusive_m2.toFixed(0)}㎡
-                              {a.pyeong ? ` (${Math.round(a.pyeong)}평)` : ''}
-                              {a.supply_m2 ? ` · 공급 ${a.supply_m2.toFixed(0)}㎡` : ''}
-                            </option>
-                          ))}
-                        </select>
-                        {selectedArea && derivedPyeong && (
-                          <div className="field-hint">
-                            ≈ 약 <strong>{derivedPyeong}평</strong>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-
                   {/* 동·호 */}
                   <div className="apply-field">
                     <label>동 / 호수</label>
@@ -732,6 +728,53 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                           </>
                         )}
                       </div>
+                    )}
+                  </div>
+
+                  {/* 평형 — 등기부 표제부 전용면적 기반 자동 선택, 다르면 수정 가능 */}
+                  <div className="apply-field">
+                    <label>평형 <span style={{ color: '#EF5350' }}>*</span></label>
+                    {areas.length === 0 ? (
+                      <div className="field-hint">
+                        <span className="match-status warning">
+                          ⚠ 이 단지의 평형 정보가 아직 수집되지 않았습니다. 다른 단지를 선택해주세요.
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <select
+                          value={selectedArea?.id ?? ''}
+                          onChange={(e) => {
+                            const id = parseInt(e.target.value, 10);
+                            setSelectedArea(areas.find((a) => a.id === id) ?? null);
+                          }}
+                          disabled={submitting}
+                          className="duration-select"
+                        >
+                          <option value="">
+                            {registryResult?.status === 'completed' ? '직접 선택' : '등기부 발급 후 자동 선택됩니다'}
+                          </option>
+                          {areas.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              전용 {a.exclusive_m2.toFixed(2)}㎡
+                              {a.pyeong ? ` (${Math.round(a.pyeong)}평)` : ''}
+                              {a.supply_m2 ? ` · 공급 ${a.supply_m2.toFixed(2)}㎡` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {registryExclusiveM2 != null && (
+                          <div className="field-hint">
+                            <span className="match-status success">
+                              등기부 전용 {registryExclusiveM2.toFixed(2)}㎡ 기반 자동 선택 — 다르면 selector 에서 변경
+                            </span>
+                          </div>
+                        )}
+                        {selectedArea && derivedPyeong && (
+                          <div className="field-hint">
+                            ≈ 약 <strong>{derivedPyeong}평</strong>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </>
@@ -837,6 +880,10 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
               </table>
             )}
           </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <Settings user={user} />
         )}
         </div>
       </div>

@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import threading
@@ -6,6 +7,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,6 +15,8 @@ from sqlalchemy.orm import Session
 from .apick import ApickClient, ApickError
 from .config import settings
 from .db import SessionLocal
+
+logger = logging.getLogger(__name__)
 from .guards import (
     GuardError,
     check_kill_switch,
@@ -262,6 +266,55 @@ def issue_or_get(
     return row
 
 
+def _convert_to_markdown(pdf_bytes: bytes) -> Optional[str]:
+    """MinerU API 호출해 PDF → markdown 변환. 실패 시 None.
+
+    응답 포맷이 두 가지(`md_content` 직접 / `results` 안 중첩) 라 양쪽 처리.
+    """
+    url = f"{settings.MINERU_API_URL}/file_parse"
+    try:
+        with httpx.Client(timeout=settings.MINERU_TIMEOUT) as client:
+            r = client.post(
+                url,
+                files={"files": ("registry.pdf", pdf_bytes, "application/pdf")},
+                data={"return_md": "true", "backend": "pipeline", "lang_list": "korean"},
+            )
+    except httpx.HTTPError as e:
+        logger.warning(f"[mineru] request failed: {type(e).__name__}: {e}")
+        return None
+    if r.status_code != 200:
+        logger.warning(f"[mineru] HTTP {r.status_code}: {r.text[:200]}")
+        return None
+    try:
+        data = r.json()
+    except ValueError:
+        logger.warning(f"[mineru] non-JSON response: {r.text[:200]}")
+        return None
+
+    def _find_md(d) -> Optional[str]:
+        if isinstance(d, dict):
+            for k in ("md_content", "markdown", "md"):
+                v = d.get(k)
+                if isinstance(v, str) and v:
+                    return v
+            for v in d.values():
+                found = _find_md(v)
+                if found:
+                    return found
+        if isinstance(d, list):
+            for v in d:
+                found = _find_md(v)
+                if found:
+                    return found
+        return None
+
+    md = _find_md(data)
+    if not md:
+        return None
+    # 이미지 참조는 분석에 무의미 → 토큰 절약
+    return re.sub(r"!\[\]\(images/[^)]+\)", "", md).strip()
+
+
 def _download_in_background(row_id: int) -> None:
     db = SessionLocal()
     try:
@@ -284,6 +337,12 @@ def _download_in_background(row_id: int) -> None:
                 with open(pdf_path, "wb") as f:
                     f.write(content)
                 row.pdf_path = pdf_path
+                if settings.MINERU_ENABLED:
+                    md = _convert_to_markdown(content)
+                    if md:
+                        row.markdown = md
+                    else:
+                        logger.info(f"[mineru] ic_id={row.ic_id} markdown 미생성 (downstream silent)")
                 row.status = "completed"
                 row.completed_at = datetime.now(timezone.utc)
                 db.commit()

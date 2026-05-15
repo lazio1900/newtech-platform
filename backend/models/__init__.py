@@ -11,6 +11,10 @@ from models.loan import (
     ALLOWED_TRANSITIONS,
 )
 from models.audit import SearchHistory, AnalysisAuditLog, SearchField
+from models.data_source_mapping import DataSourceMapping
+from models.db_connection import DbConnection
+from models.llm_connection import LlmConnection
+from models.llm_prompt import LlmPrompt
 
 # 수집기 소유 (ADR-002: 본 앱은 read-only로 사용. ORM 매핑 유지)
 from models.complex import Complex, Area, PriorityLevel
@@ -40,6 +44,10 @@ __all__ = [
     "SearchHistory",
     "AnalysisAuditLog",
     "SearchField",
+    "DataSourceMapping",
+    "DbConnection",
+    "LlmConnection",
+    "LlmPrompt",
     # 수집기 소유 (read-only)
     "Complex",
     "Area",

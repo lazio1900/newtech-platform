@@ -88,6 +88,15 @@
   gap: 4px;
 }
 
+.sidebar-bottom {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .sidebar-btn {
   display: flex;
   align-items: center;

@@ -10,6 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import assert_production_safe, settings
 from routers import (
+    admin_data_mappings,
+    admin_db,
+    admin_llm,
+    admin_prompts,
+    admin_users,
     analyze,
     applications,
     auth,
@@ -19,6 +24,7 @@ from routers import (
     regions,
     registry,
     suggestions,
+    users,
 )
 
 assert_production_safe()
@@ -50,6 +56,12 @@ app.include_router(analyze.router,       prefix="/api/analyze",       tags=["ana
 app.include_router(complexes.router,     prefix="/api/complexes",     tags=["complexes"])
 app.include_router(regions.router,       prefix="/api/regions",       tags=["regions"])
 app.include_router(registry.router,      prefix="/api/registry",      tags=["registry"])
+app.include_router(users.router,         prefix="/api/me",            tags=["users"])
+app.include_router(admin_users.router,   prefix="/api/admin/users",   tags=["admin-users"])
+app.include_router(admin_llm.router,     prefix="/api/admin/llm/connections", tags=["admin-llm"])
+app.include_router(admin_prompts.router, prefix="/api/admin/llm/prompts", tags=["admin-prompts"])
+app.include_router(admin_db.router,      prefix="/api/admin/db/connections", tags=["admin-db"])
+app.include_router(admin_data_mappings.router, prefix="/api/admin/data-mappings", tags=["admin-data-mappings"])
 
 
 @app.on_event("startup")

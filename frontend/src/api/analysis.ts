@@ -7,6 +7,8 @@ interface AnalyzeOptions {
   complexName?: string | null;
   pyeong?: number | null;
   applicationId?: string | null;
+  registryIcId?: number | null;
+  interestRate?: number | null;
 }
 
 export const analyzeProperty = async (
@@ -25,6 +27,8 @@ export const analyzeProperty = async (
     complex_name: options.complexName ?? null,
     pyeong: options.pyeong ?? null,
     application_id: options.applicationId ?? null,
+    registry_ic_id: options.registryIcId ?? null,
+    interest_rate: options.interestRate ?? null,
   }, { timeout: 180_000 });
   return data.data;
 };

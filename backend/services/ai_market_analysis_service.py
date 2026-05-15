@@ -7,8 +7,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Optional
+
+# 한국어 평어 종결 "다."/"요." 직후의 공백을 개행으로 — 문장 단위 줄바꿈.
+_SENTENCE_BREAK = re.compile(r"(?<=[다요])\.\s+(?=\S)")
+
+
+def _wrap_sentences(text: str) -> str:
+    """JB 적정시세 같이 길어지기 쉬운 섹션의 가독성용 줄바꿈."""
+    if not text:
+        return text
+    return _SENTENCE_BREAK.sub(".\n", text).strip()
 
 from sqlalchemy.orm import Session
 
@@ -25,9 +36,9 @@ JSON 키와 작성 가이드:
 - "kb_시세":  KB 추정가 / 상하한 / 시세 추세
 - "실거래가": 최근 실거래 가격, 거래 건수, 거래 추세 (안정/상승/하락)
 - "매매호가": 현재 active 매물 평균/최신 호가, 매물 수, 시장 분위기
-- "jb_적정시세": JB 동적 가중치 산출(KB/실거래/호가 가중치, 신뢰도, 이상치 제거)와 그 의미
-- "예측": 향후 3개월 예측값과 90% 신뢰구간 하한선이 LTV 심사에 미칠 영향
-- "ltv_검토": 채권합계와 시세 기준 LTV (현재시세 / JB 기준), 안전성
+- "jb_적정시세": JB 적정시세 최종값을 인용한 뒤, prompt 의 "수행달 가중치(KB %·실거래 %·호가 %)" 와 "산출 근거" 항목(수행달, 그 달 KB/실거래/호가 평균과 표본 수)을 **수치 그대로 들어** 1~2문장으로 풀이. 기본 가중치는 KB 40% / 실거래 60% / 호가 0% (호가 수집 안정화 후 활성)이며, 수행달에 실거래 표본이 없으면 KB 단독(100%)으로 폴백. 산출은 그 달의 IQR-제거 평균값들의 가중평균임을 명시.
+- "예측": prompt 의 "+3개월 예측" 라인에서 **중심값만 수치로 인용**하고, *왜 그 값이 예측됐는지* 를 JB 시계열의 최근 추세(예: "최근 12개월 동안 약 +N% 상승 추세가 이어진다고 가정") 와 결합해 1~2문장 평이하게 설명. **상한·하한·신뢰구간 폭에 대한 언급은 하지 마세요.** 마지막에 LTV 심사에 미칠 영향을 1문장.
+- "ltv_검토": 채권합계와 시세 기준 LTV (현재시세 / JB 기준), 안전성. **금리는 반드시 prompt 의 "입력 금리" 값을 그대로 인용** — 임의 수치 사용 금지. "미입력" 이면 금리 언급을 생략하고 LTV 만으로 의견.
 - "인근_유사물건": 1km 반경 같은 평형 단지들의 가격대, 평균 변동률, 기준 단지 대비 위치
 - "종합_의견": 시세 안정성·LTV 적정성 종합 평가
 
@@ -59,6 +70,7 @@ def build_prompt(
     loan_amount: int,
     total_prior: int,
     pyeong: Optional[int] = None,
+    interest_rate: Optional[float] = None,
 ) -> str:
     kp = credit.kb_price
     mt = credit.molit_transactions
@@ -71,13 +83,13 @@ def build_prompt(
         w = jd.weights
         jb_section = (
             f"- JB 적정시세: {_format_won(jd.fair_price)}\n"
-            f"- 동적 가중치: KB {w.get('kb', 0)*100:.0f}% / 실거래 {w.get('molit', 0)*100:.0f}% / 호가 {w.get('naver', 0)*100:.0f}%\n"
+            f"- 수행달 가중치: KB {w.get('kb', 0)*100:.0f}% / 실거래 {w.get('molit', 0)*100:.0f}% / 호가 {w.get('naver', 0)*100:.0f}%\n"
             f"- 산출 근거: {' / '.join(jd.notes)}\n"
         )
         if jd.forecast and len(jd.forecast) >= 4:
             f3 = jd.forecast[3]  # +3개월
             jb_section += (
-                f"- +3개월 예측: 중심 {_format_won(f3.predicted)} / 하한 {_format_won(f3.lower)} / 상한 {_format_won(f3.upper)} (90% CI)\n"
+                f"- +3개월 예측: 중심 {_format_won(f3.predicted)} / 하한 {_format_won(f3.lower)} / 상한 {_format_won(f3.upper)} (80% CI)\n"
             )
 
     # LTV
@@ -121,13 +133,14 @@ def build_prompt(
 - 활성 매물 수: {nl.listing_count}건
 - 추세: {nl.trend}
 
-[JB 적정시세 (1단계 동적 가중치 + IQR + 시간감쇠)]
+[JB 적정시세 (월별 IQR 평균 + 수행달 가중치)]
 {jb_section}
 
 [LTV 검토]
 - 채권합계 (선순위 + 신청금액): {total_prior:,}원
 - 현재 시세 LTV: {ltv_current:.1f}% (KB 추정가 기준)
 - JB 적정시세 LTV: {ltv_jb:.1f}%
+- 입력 금리: {f"{interest_rate:.2f}%" if interest_rate is not None else "미입력"}
 - 평형: {pyeong}평
 
 [인근 유사물건]
@@ -146,6 +159,7 @@ def generate_or_get_cached(
     loan_amount: int,
     total_prior: int,
     pyeong: Optional[int] = None,
+    interest_rate: Optional[float] = None,
 ) -> str:
     app = None
     if application_id:
@@ -157,12 +171,14 @@ def generate_or_get_cached(
     if not credit:
         return _fallback_text(credit, loan_amount)
 
-    prompt = build_prompt(credit, nearby, loan_amount, total_prior, pyeong)
+    prompt = build_prompt(credit, nearby, loan_amount, total_prior, pyeong, interest_rate)
 
     try:
         from services.llm_service import LLMClient
+        from services.prompt_registry import get_prompt
         client = LLMClient()
-        result = client.complete(prompt, system=SYSTEM_PROMPT, json_mode=True)
+        system_prompt = get_prompt(db, "market", "system", SYSTEM_PROMPT)
+        result = client.complete(prompt, system=system_prompt, json_mode=True)
         raw = (result.get("text") or "").strip()
         if not raw:
             return _fallback_text(credit, loan_amount)
@@ -195,7 +211,12 @@ def generate_or_get_cached(
             ("[인근 유사물건]", parsed.get("인근_유사물건")),
             ("[종합 의견]", parsed.get("종합_의견")),
         ]
-        parts = [f"{label}\n{_flatten(body)}" for label, body in sections if _flatten(body)]
+        parts = []
+        for label, body in sections:
+            flat = _flatten(body)
+            if not flat:
+                continue
+            parts.append(f"{label}\n{_wrap_sentences(flat)}")
         text = "\n\n".join(parts)
         if not text:
             return _fallback_text(credit, loan_amount)
