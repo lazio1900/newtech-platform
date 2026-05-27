@@ -4,6 +4,7 @@ import { submitApplication, getApplications } from '../api/applications';
 import { complexesApi } from '../api/complexes';
 import { regionsApi, RegionItem, DongItem } from '../api/regions';
 import { registryApi } from '../api/registry';
+import { pickDaumBuildingName } from '../lib/daumPostcode';
 import type { Area, Complex } from '@/types/complex';
 import Settings from './Settings';
 import UserProfileMenu from './UserProfileMenu';
@@ -82,10 +83,13 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
     setRegistryResult(null);
     setRegistryExclusiveM2(null);
     try {
-      // backend 가 complex_id 기반으로 4단계 후보 chain (지번/도로명 × 단지명 유무) 으로 매칭 시도.
-      // payload.address 는 후보가 못 만들어진 예외 경로의 fallback 용도.
+      // backend 6단계 chain: 지번/도로명 × (KB 단지명 / KB 단지명 괄호 제거 / Daum buildingName).
+      // payload.address 는 후보가 못 만들어진 예외 경로의 fallback.
       const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
       const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
+
+      // Daum 우편번호 popup 으로 buildingName 만 받아온다 (취소하면 null → 5·6 후보 skip).
+      const buildingName = await pickDaumBuildingName(selectedComplex.address || '');
 
       const res = await registryApi.request({
         address: fullAddress,
@@ -93,6 +97,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
         ho: ho.trim(),
         type: '집합건물',
         complex_id: selectedComplex.id,
+        building_name: buildingName,
       });
 
       // 즉시 완료된 경우 (캐시 hit 등)
@@ -600,6 +605,11 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                           {c.total_households != null && (
                             <span style={{ marginLeft: 8, fontSize: 12, color: '#6B7785' }}>
                               {c.total_households.toLocaleString()}세대
+                            </span>
+                          )}
+                          {c.address && (
+                            <span style={{ marginLeft: 16, fontSize: 12, color: '#A0A8B4' }}>
+                              {c.address}
                             </span>
                           )}
                         </button>

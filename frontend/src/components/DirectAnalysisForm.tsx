@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { complexesApi } from '../api/complexes';
 import { regionsApi, RegionItem, DongItem } from '../api/regions';
 import { registryApi } from '../api/registry';
+import { pickDaumBuildingName } from '../lib/daumPostcode';
 import type { Area, Complex } from '@/types/complex';
 import './DirectAnalysisForm.css';
 
@@ -227,9 +228,12 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
     try {
       const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
       const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
+      // Daum 우편번호 popup 으로 buildingName 만 받아온다 (취소하면 null → 5·6 후보 skip).
+      const buildingName = await pickDaumBuildingName(selectedComplex.address || '');
       const res = await registryApi.request({
         address: fullAddress, dong: dong.trim(), ho: ho.trim(),
         type: '집합건물', complex_id: selectedComplex.id,
+        building_name: buildingName,
       });
       if (res.status === 'completed' && res.ic_id) {
         setRegistryResult({
@@ -390,6 +394,9 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
                     <strong>{c.name}</strong>
                     {c.total_households != null && (
                       <span className="daf-complex-units">{c.total_households.toLocaleString()}세대</span>
+                    )}
+                    {c.address && (
+                      <span className="daf-complex-addr">{c.address}</span>
                     )}
                   </button>
                 ))}

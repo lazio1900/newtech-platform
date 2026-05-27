@@ -6,6 +6,7 @@ export interface RegistryRequestIn {
   ho?: string | null;
   type?: string;        // 등기부등본 타입 (예: 토지/건물/집합)
   complex_id?: number | null;  // backend 가 지번/도로명 후보 chain 구성용
+  building_name?: string | null;  // Daum 우편번호 popup 의 buildingName (5·6 후보용)
   force_refresh?: boolean;
 }
 

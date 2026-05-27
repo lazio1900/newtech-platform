@@ -34,7 +34,7 @@ class RegistryRequestPayload(BaseModel):
     type: Optional[str] = "집합건물"
     listing_id: Optional[int] = None
     complex_id: Optional[int] = None  # backend 가 지번/도로명 후보 chain 구성용
-    building_name: Optional[str] = None  # Daum 우편번호 popup 결과 (선택)
+    building_name: Optional[str] = None  # Daum 우편번호 popup 의 buildingName (5·6 후보용)
     force_refresh: bool = False
 
 
@@ -64,41 +64,29 @@ def _is_no_match_failure(resp_json: dict) -> bool:
     return status == "failed" and "검색 결과" in err
 
 
-_PAREN_RE = re.compile(r"\(([^()]+)\)")
+_BRACKETED_RE = re.compile(r"\([^()]*\)|\[[^\[\]]*\]|\{[^{}]*\}|<[^<>]*>")
 
 
-def _name_variants(name: str) -> list[str]:
-    """KB 단지명 → IROS 매칭용 표기 변형.
+def _strip_brackets(name: str) -> str:
+    """단지명에서 괄호·꺽쇠 등 특수기호로 감싼 구간을 통째로 제거.
 
-    KB 는 시공사를 괄호로 표기 ("아름마을(효성)") 하지만 IROS 등기부에는
-    괄호가 없거나 공백으로 분리된 경우가 많다. 원본 표기 우선, 변형은 보조.
+    예: "아름마을(효성)" → "아름마을", "X[A] Y" → "X Y"
     """
-    out: list[str] = [name]
-    if _PAREN_RE.search(name):
-        spaced = _PAREN_RE.sub(lambda m: f" {m.group(1)}", name)
-        out.append(" ".join(spaced.split()))  # 다중 공백 정규화
-        out.append(_PAREN_RE.sub(lambda m: m.group(1), name))  # 괄호 제거(공백 없음)
-    # 중복 제거 (순서 보존)
-    seen: set[str] = set()
-    uniq: list[str] = []
-    for v in out:
-        v = v.strip()
-        if v and v not in seen:
-            uniq.append(v)
-            seen.add(v)
-    return uniq
+    return " ".join(_BRACKETED_RE.sub("", name).split())
 
 
-def _build_address_candidates(complex_obj, building_name: Optional[str]) -> list[str]:
-    """IROS 매칭률 ↑ 를 위한 후보 주소.
+def _build_address_candidates(complex_obj, daum_name: Optional[str] = None) -> list[str]:
+    """IROS 매칭률 ↑ 를 위한 후보 주소 (동·호는 upstream 이 별도 필드로 append).
 
-    순서 (코드상 단지명을 도로검색기 단지명보다 먼저, 동·호는 service 에서 append):
-      1. 지번 + 코드 단지명 (complex.name)
-      2. 도로명 + 코드 단지명
-      3. 지번 + Daum 단지명 (building_name)
-      4. 도로명 + Daum 단지명
-    코드 단지명에 괄호가 있으면 "괄호→공백" / "괄호 제거" 변형을 같은 단계의
-    보조 후보로 끼워 넣는다 (예: "아름마을(효성)" → "아름마을 효성" / "아름마을효성").
+    순서:
+      1. 지번 + 단지명(KB)
+      2. 도로명 + 단지명(KB)
+      3. 지번 + 단지명(KB, 괄호 제거)
+      4. 도로명 + 단지명(KB, 괄호 제거)
+      5. 지번 + 단지명(Daum buildingName)
+      6. 도로명 + 단지명(Daum buildingName)
+    단지명에 괄호가 없으면 3·4 는 1·2 와, daum_name 이 KB 단지명과 같으면 5·6
+    도 앞 단계와 중복되어 dedupe 된다.
     """
     candidates: list[str] = []
     seen: set[str] = set()
@@ -111,21 +99,23 @@ def _build_address_candidates(complex_obj, building_name: Optional[str]) -> list
 
     jibun = (complex_obj.address or "").strip()
     road = (complex_obj.road_address or "").strip()
-    code_name = (complex_obj.name or "").strip()
-    daum_name = (building_name or "").strip()
+    name = (complex_obj.name or "").strip()
+    daum = (daum_name or "").strip()
 
-    if code_name:
-        for variant in _name_variants(code_name):
-            if jibun:
-                add(f"{jibun} {variant}")
-            if road:
-                add(f"{road} {variant}")
-    if daum_name:
-        for variant in _name_variants(daum_name):
-            if jibun:
-                add(f"{jibun} {variant}")
-            if road:
-                add(f"{road} {variant}")
+    variants: list[str] = []
+    if name:
+        variants.append(name)
+        stripped = _strip_brackets(name)
+        if stripped and stripped != name:
+            variants.append(stripped)
+    if daum:
+        variants.append(daum)
+
+    for variant in variants:
+        if jibun:
+            add(f"{jibun} {variant}")
+        if road:
+            add(f"{road} {variant}")
     return candidates
 
 
@@ -135,13 +125,15 @@ def request_registry(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """등기부 발급 요청. complex_id 가 있으면 4단계 후보 chain 으로 매칭률 ↑.
+    """등기부 발급 요청. complex_id 가 있으면 6단계 후보 chain 으로 매칭률 ↑.
 
     후보 순서 (complex_id 있을 때):
-      1) 지번 (단지명 없이)
-      2) 도로명 (단지명 없이)
-      3) 지번 + Daum 단지명 (popup 사용 시)
-      4) 도로명 + Daum 단지명 (popup 사용 시)
+      1) 지번 + 단지명(KB) (+ 동·호)
+      2) 도로명 + 단지명(KB) (+ 동·호)
+      3) 지번 + 단지명(KB, 괄호 제거) (+ 동·호)
+      4) 도로명 + 단지명(KB, 괄호 제거) (+ 동·호)
+      5) 지번 + 단지명(Daum buildingName) (+ 동·호)
+      6) 도로명 + 단지명(Daum buildingName) (+ 동·호)
 
     complex_id 없으면 payload.address 그대로 1회만 시도.
     각 후보를 순차 호출, "검색 결과 없음" 이면 다음 후보로. 첫 성공 시 즉시 반환.
@@ -163,7 +155,7 @@ def request_registry(
     if not candidates:
         candidates = [payload.address]
 
-    logger.info(f"[registry] {len(candidates)}개 후보 chain: {candidates}")
+    logger.warning(f"[registry] {len(candidates)}개 후보 chain: {candidates}")
 
     last_resp_json: Optional[dict] = None
     last_http_error: Optional[tuple[int, str]] = None
@@ -186,11 +178,11 @@ def request_registry(
 
         resp_json = r.json()
         if _is_no_match_failure(resp_json):
-            logger.info(f"[registry] 후보#{idx} 매칭 실패: {cand}")
+            logger.warning(f"[registry] 후보#{idx} 매칭 실패: {cand}")
             last_resp_json = resp_json
             continue
 
-        logger.info(f"[registry] 후보#{idx} 매칭 성공: {cand} → ic_id={resp_json.get('ic_id')}")
+        logger.warning(f"[registry] 후보#{idx} 매칭 성공: {cand} → ic_id={resp_json.get('ic_id')}")
         return resp_json
 
     # 모든 후보 실패

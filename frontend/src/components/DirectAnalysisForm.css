@@ -114,6 +114,11 @@
   font-size: 12px;
   color: #6B7785;
 }
+.daf-complex-addr {
+  margin-left: 16px;
+  font-size: 12px;
+  color: #A0A8B4;
+}
 
 .daf-link-btn {
   margin-top: 6px;
