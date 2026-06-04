@@ -7,9 +7,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { complexesApi } from '../api/complexes';
+import { lendersApi, type Lender } from '../api/lenders';
 import { regionsApi, RegionItem, DongItem } from '../api/regions';
 import { registryApi } from '../api/registry';
-import { pickDaumBuildingName } from '../lib/daumPostcode';
 import type { Area, Complex } from '@/types/complex';
 import './DirectAnalysisForm.css';
 
@@ -17,7 +17,13 @@ const M2_PER_PYEONG = 3.3058;
 
 export interface DirectAnalyzePayload {
   company: string;
+  ceoName: string;
+  businessNumber: string;
+  creditScoreNice: number | null;
+  creditScoreKcb: number | null;
   address: string;
+  dong: string;
+  ho: string;
   loanAmount: number;
   interestRate: number;
   duration: number;
@@ -30,12 +36,30 @@ export interface DirectAnalyzePayload {
   };
 }
 
+export interface DirectAnalyzeInitial {
+  lenderBusinessNumber?: string | null;
+  lenderCompanyName?: string | null;
+  complexId?: number | null;
+  areaId?: number | null;
+  dong?: string | null;
+  ho?: string | null;
+  registryIcId?: number | null;
+  loanAmount?: number | null;
+  interestRate?: number | null;
+  loanDuration?: number | null;
+}
+
 interface DirectAnalysisFormProps {
   onAnalyze: (payload: DirectAnalyzePayload) => void;
   loading: boolean;
+  initial?: DirectAnalyzeInitial | null;
+  submitLabel?: string;
+  submitLabelBusy?: string;
 }
 
-export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysisFormProps) {
+export default function DirectAnalysisForm({
+  onAnalyze, loading, initial, submitLabel = '신청', submitLabelBusy = '신청 중...',
+}: DirectAnalysisFormProps) {
   // 시도/시군구/읍면동
   const [sidoList, setSidoList] = useState<RegionItem[]>([]);
   const [sigunguList, setSigunguList] = useState<RegionItem[]>([]);
@@ -66,21 +90,127 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
     status?: string; ic_id?: number | null; pdf_url?: string | null;
     cached?: boolean; error?: string | null;
   } | null>(null);
+  // 실제 매칭에 성공한 주소 (잘못된 등기부 가져왔는지 확인용)
+  const [registryMatch, setRegistryMatch] = useState<{
+    address?: string | null; dong?: string | null; ho?: string | null;
+  } | null>(null);
   // 등기부 표제부에서 추출된 전용면적 (자동 평형 제안용)
   const [registryExclusiveM2, setRegistryExclusiveM2] = useState<number | null>(null);
 
-  // 업체명 + 대출 조건
-  const [company, setCompany] = useState<string>('직접조회');
+  // 차주(대부업체) — 마스터에서 선택
+  const [lenders, setLenders] = useState<Lender[]>([]);
+  const [lendersLoading, setLendersLoading] = useState<boolean>(false);
+  const [lenderQuery, setLenderQuery] = useState<string>('');
+  const [selectedLender, setSelectedLender] = useState<Lender | null>(null);
+
+  // 대출 조건
   const [amount, setAmount] = useState<string>('');
   const [interestRate, setInterestRate] = useState<string>('7.5');
   const [duration, setDuration] = useState<string>('12');
 
   const debounceRef = useRef<number | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const prefilledRef = useRef<boolean>(false);
+  // prefill 중에는 시도/시군구/읍면동 변경 effect 가 하위 선택값을 reset 하지 않도록 가드
+  const isPrefillingRef = useRef<boolean>(false);
 
   // 시도 목록 로드
   useEffect(() => {
     regionsApi.listSido().then(setSidoList).catch(() => setSidoList([]));
   }, []);
+
+  // 대부업체 목록 로드 (한 번)
+  useEffect(() => {
+    setLendersLoading(true);
+    lendersApi.list()
+      .then(setLenders)
+      .catch(() => setLenders([]))
+      .finally(() => setLendersLoading(false));
+  }, []);
+
+  // 수정 모드 prefill — initial 들어오면 한 번만 채움
+  useEffect(() => {
+    if (!initial || prefilledRef.current) return;
+    if (initial.dong) setDong(initial.dong);
+    if (initial.ho) setHo(initial.ho);
+    if (initial.loanAmount != null) setAmount(String(initial.loanAmount));
+    if (initial.interestRate != null) setInterestRate(String(initial.interestRate));
+    if (initial.loanDuration != null) setDuration(String(initial.loanDuration));
+    if (initial.registryIcId) {
+      setRegistryResult({
+        status: 'completed', ic_id: initial.registryIcId,
+        pdf_url: registryApi.pdfUrl(initial.registryIcId),
+        cached: true, error: null,
+      });
+    }
+    if (initial.complexId) {
+      isPrefillingRef.current = true;
+      complexesApi.get(initial.complexId)
+        .then((co) => setSelectedComplex(co))
+        .catch(() => { isPrefillingRef.current = false; });
+    }
+    prefilledRef.current = true;
+  }, [initial]);
+
+  // 단지 prefill 완료 후 시도 자동 선택 (region_code 앞 2자리)
+  useEffect(() => {
+    if (!isPrefillingRef.current || !selectedComplex || sidoList.length === 0 || selectedSido) return;
+    const sigCode = (selectedComplex.region_code ?? '').trim();
+    if (sigCode.length < 2) { isPrefillingRef.current = false; return; }
+    const sidoItem = sidoList.find((s) => s.code === sigCode.slice(0, 2));
+    if (sidoItem) setSelectedSido(sidoItem);
+    else isPrefillingRef.current = false;
+  }, [selectedComplex, sidoList, selectedSido]);
+
+  // 시군구 로드 후 자동 선택
+  useEffect(() => {
+    if (!isPrefillingRef.current || !selectedComplex || sigunguList.length === 0 || selectedSigungu) return;
+    const sigCode = (selectedComplex.region_code ?? '').trim();
+    if (!sigCode) return;
+    const sigItem = sigunguList.find((s) => s.code === sigCode);
+    if (sigItem) setSelectedSigungu(sigItem);
+  }, [selectedComplex, sigunguList, selectedSigungu]);
+
+  // 읍면동 로드 후 자동 선택. ref 해제는 dong 변경 effect 에서 — 그래야 그 effect 가
+  // setSelectedComplex(null) 호출을 한 번 skip 한다.
+  useEffect(() => {
+    if (!isPrefillingRef.current || !selectedComplex || dongList.length === 0 || selectedDong) return;
+    const dCode = (selectedComplex.dong_code ?? '').trim();
+    if (dCode) {
+      const dItem = dongList.find((d) => d.code === dCode);
+      if (dItem) { setSelectedDong(dItem); return; }
+    }
+    // dong_code 매칭 없으면 여기서 prefill 종료 (dong 변경 effect 가 트리거되지 않으므로)
+    isPrefillingRef.current = false;
+  }, [selectedComplex, dongList, selectedDong]);
+
+  // lenders 로드 후 initial 의 식별 정보로 selectedLender 자동 매칭
+  useEffect(() => {
+    if (!initial || lenders.length === 0 || selectedLender) return;
+    const biz = (initial.lenderBusinessNumber ?? '').trim();
+    const name = (initial.lenderCompanyName ?? '').trim();
+    const match = lenders.find((l) =>
+      (biz && l.business_number === biz) ||
+      (!biz && name && l.company_name === name)
+    );
+    if (match) setSelectedLender(match);
+  }, [initial, lenders, selectedLender]);
+
+  // initial.areaId 가 있으면 areas 로드 후 자동 선택 (단일평형 자동 선택보다 우선)
+  useEffect(() => {
+    if (!initial?.areaId || areas.length === 0) return;
+    const match = areas.find((a) => a.id === initial.areaId);
+    if (match) setSelectedArea(match);
+  }, [initial, areas]);
+
+  const filteredLenders = useMemo(() => {
+    const q = lenderQuery.trim().toLowerCase();
+    if (!q) return lenders;
+    return lenders.filter((l) =>
+      l.company_name.toLowerCase().includes(q) ||
+      (l.business_number ?? '').toLowerCase().includes(q)
+    );
+  }, [lenders, lenderQuery]);
 
   // 시도 → 시군구
   useEffect(() => {
@@ -90,16 +220,20 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
       return;
     }
     regionsApi.listSigungu(selectedSido.code).then(setSigunguList).catch(() => setSigunguList([]));
-    setSelectedSigungu(null);
-    setSelectedDong(null);
-    setDongList([]);
-    resetComplexAndDownstream();
+    if (!isPrefillingRef.current) {
+      setSelectedSigungu(null);
+      setSelectedDong(null);
+      setDongList([]);
+      resetComplexAndDownstream();
+    }
   }, [selectedSido]);
 
   // 시군구 → 읍면동 + 단지 검색
   useEffect(() => {
-    setSelectedDong(null);
-    resetComplexAndDownstream();
+    if (!isPrefillingRef.current) {
+      setSelectedDong(null);
+      resetComplexAndDownstream();
+    }
     if (!selectedSigungu) {
       setDongList([]);
       return;
@@ -111,7 +245,12 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
   // 동 선택 → 단지 검색 다시
   useEffect(() => {
     if (!selectedSigungu) return;
-    setSelectedComplex(null);
+    if (isPrefillingRef.current) {
+      // prefill 시퀀스의 마지막 단계 — 단지를 reset 하지 않고 ref 만 해제
+      isPrefillingRef.current = false;
+    } else {
+      setSelectedComplex(null);
+    }
     runComplexSearch(complexQuery);
   }, [selectedDong]);
 
@@ -206,12 +345,12 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
     }
   };
 
-  const derivedPyeong = useMemo<number | null>(() => {
+  // 표시용(소숫점 2자리) / payload용(정수) 분리 — backend pyeong 컬럼은 Integer
+  const derivedPyeongFloat = useMemo<number | null>(() => {
     if (!selectedArea?.exclusive_m2) return null;
-    return selectedArea.pyeong
-      ? Math.round(selectedArea.pyeong)
-      : Math.round(selectedArea.exclusive_m2 / M2_PER_PYEONG);
+    return selectedArea.pyeong ?? selectedArea.exclusive_m2 / M2_PER_PYEONG;
   }, [selectedArea]);
+  const derivedPyeong = derivedPyeongFloat != null ? Math.round(derivedPyeongFloat) : null;
 
   const formatDongHo = (d: string, h: string): string => {
     const parts: string[] = [];
@@ -224,17 +363,22 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
     if (!selectedComplex || !dong.trim() || !ho.trim()) return;
     setRegistryLoading(true);
     setRegistryResult(null);
+    setRegistryMatch(null);
     setRegistryExclusiveM2(null);
     try {
       const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
       const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
-      // Daum 우편번호 popup 으로 buildingName 만 받아온다 (취소하면 null → 5·6 후보 skip).
-      const buildingName = await pickDaumBuildingName(selectedComplex.address || '');
       const res = await registryApi.request({
         address: fullAddress, dong: dong.trim(), ho: ho.trim(),
         type: '집합건물', complex_id: selectedComplex.id,
-        building_name: buildingName,
       });
+      if (res.matched_address) {
+        setRegistryMatch({
+          address: res.matched_address,
+          dong: res.matched_dong ?? null,
+          ho: res.matched_ho ?? null,
+        });
+      }
       if (res.status === 'completed' && res.ic_id) {
         setRegistryResult({
           status: res.status, ic_id: res.ic_id,
@@ -288,8 +432,54 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
     }
   };
 
+  const handleUploadRegistry = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';  // 같은 파일 재선택 가능하게 reset
+    if (!file) return;
+    if (!selectedComplex) { alert('단지를 먼저 선택해주세요.'); return; }
+
+    setRegistryLoading(true);
+    setRegistryResult(null);
+    setRegistryMatch(null);
+    setRegistryExclusiveM2(null);
+    try {
+      const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
+      const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
+      const res = await registryApi.upload({
+        file,
+        address: fullAddress,
+        dong: dong.trim() || null,
+        ho: ho.trim() || null,
+        type: '집합건물',
+      });
+      setRegistryResult({
+        status: res.status, ic_id: res.ic_id,
+        pdf_url: res.ic_id ? registryApi.pdfUrl(res.ic_id) : null,
+        cached: false, error: res.error_message,
+      });
+      setRegistryMatch({
+        address: `[직접 업로드] ${fullAddress}`,
+        dong: dong.trim() || null,
+        ho: ho.trim() || null,
+      });
+      if (res.ic_id) {
+        applyAreaSuggestion(res.ic_id, selectedComplex.id);
+      }
+    } catch (err) {
+      const ex = err as { response?: { data?: { detail?: string | { message?: string } } }; message?: string };
+      const detail = ex?.response?.data?.detail;
+      setRegistryResult({
+        error: (typeof detail === 'object' ? detail?.message : detail)
+            || ex?.message
+            || 'PDF 업로드 실패',
+      });
+    } finally {
+      setRegistryLoading(false);
+    }
+  };
+
   const handleSubmit = () => {
-    if (!company.trim()) { alert('업체명을 입력해주세요.'); return; }
+    if (!selectedLender) { alert("'대부업체 등록' 탭에서 차주 업체를 먼저 등록·선택해주세요."); return; }
     if (!selectedComplex) { alert('단지를 선택해주세요.'); return; }
     if (!selectedArea) { alert('평형을 선택해주세요.'); return; }
     if (!amount) { alert('대출 신청금액을 입력해주세요.'); return; }
@@ -299,8 +489,14 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
     const fullAddress = [roadAddr, selectedComplex.name, dongHo].filter(Boolean).join(' ').trim();
 
     onAnalyze({
-      company: company.trim(),
+      company: selectedLender.company_name,
+      ceoName: selectedLender.ceo_name ?? '',
+      businessNumber: selectedLender.business_number ?? '',
+      creditScoreNice: selectedLender.credit_score_nice ?? null,
+      creditScoreKcb: selectedLender.credit_score_kcb ?? null,
       address: fullAddress,
+      dong: dong.trim(),
+      ho: ho.trim(),
       loanAmount: Number(amount),
       interestRate: Number(interestRate),
       duration: Number(duration),
@@ -319,14 +515,72 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
   return (
     <div className="direct-analysis-form">
       <div className="daf-section">
-        <h3>분석 대상 정보</h3>
+        <h3>차주(대부업체) 선택</h3>
 
         <div className="daf-field">
-          <label>업체명 <span className="daf-required">*</span></label>
-          <input type="text" value={company} onChange={(e) => setCompany(e.target.value)}
-                 disabled={submitting} maxLength={200} />
-          <div className="daf-hint">분석 결과에 표기될 라벨 (실 신청건이 아니라 임의 입력 가능)</div>
+          <label>대부업체 <span className="daf-required">*</span></label>
+          {lendersLoading ? (
+            <div className="daf-hint"><span className="daf-status loading">⏳ 목록 불러오는 중…</span></div>
+          ) : lenders.length === 0 ? (
+            <div className="daf-hint">
+              <span className="daf-status warning">
+                ⚠ 등록된 대부업체가 없습니다. 좌측 '대부업체 등록' 탭에서 먼저 등록하세요.
+              </span>
+            </div>
+          ) : (
+            <>
+              <select
+                value={selectedLender?.id ?? ''}
+                onChange={(e) => {
+                  const id = parseInt(e.target.value, 10);
+                  setSelectedLender(lenders.find((l) => l.id === id) ?? null);
+                }}
+                disabled={submitting}
+                className="daf-select"
+              >
+                <option value="">선택하세요</option>
+                {filteredLenders.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.company_name}{l.business_number ? ` (${l.business_number})` : ''}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={lenderQuery}
+                onChange={(e) => setLenderQuery(e.target.value)}
+                placeholder="명칭/사업자번호로 좁히기 (선택)"
+                disabled={submitting}
+                style={{ marginTop: 6 }}
+              />
+            </>
+          )}
         </div>
+
+        {selectedLender && (
+          <div
+            className="daf-field"
+            style={{
+              background: '#F3F8FD', border: '1px solid #DCE7F0', borderRadius: 8,
+              padding: 12, display: 'grid',
+              gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, fontSize: 13,
+            }}
+          >
+            <div><div style={{ color: '#6b7280' }}>대부업체</div><strong>{selectedLender.company_name}</strong></div>
+            <div><div style={{ color: '#6b7280' }}>사업자번호</div><strong>{selectedLender.business_number ?? '-'}</strong></div>
+            <div><div style={{ color: '#6b7280' }}>대표자명</div><strong>{selectedLender.ceo_name ?? '-'}</strong></div>
+            <div>
+              <div style={{ color: '#6b7280' }}>신용점수 (NICE / KCB)</div>
+              <strong>
+                {selectedLender.credit_score_nice ?? '-'} / {selectedLender.credit_score_kcb ?? '-'}
+              </strong>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="daf-section">
+        <h3>담보 물건 정보</h3>
 
         {/* 시도/시군구/읍면동 */}
         <div className="daf-field" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
@@ -442,18 +696,32 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
 
             {/* 등기부등본 */}
             <div className="daf-field">
-              <button type="button" onClick={handleFetchRegistry}
-                      disabled={submitting || registryLoading || !dong.trim() || !ho.trim()}
-                      className="daf-registry-btn"
-                      style={{
-                        background: registryLoading ? '#7DCCE5' : '#006FBD',
-                        cursor: registryLoading ? 'wait' : 'pointer',
-                        opacity: (!dong.trim() || !ho.trim()) ? 0.5 : 1,
-                      }}>
-                {registryLoading ? '발급 요청 중...' : '📄 등기부등본 가져오기'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" onClick={handleFetchRegistry}
+                        disabled={submitting || registryLoading || !dong.trim() || !ho.trim()}
+                        className="daf-registry-btn"
+                        style={{
+                          background: registryLoading ? '#7DCCE5' : '#006FBD',
+                          cursor: registryLoading ? 'wait' : 'pointer',
+                          opacity: (!dong.trim() || !ho.trim()) ? 0.5 : 1,
+                        }}>
+                  {registryLoading ? '처리 중...' : '📄 등기부등본 가져오기'}
+                </button>
+                <span style={{ color: '#9CA3AF', fontSize: 12 }}>또는</span>
+                <button type="button" onClick={() => uploadInputRef.current?.click()}
+                        disabled={submitting || registryLoading}
+                        style={{
+                          padding: '8px 14px', background: '#fff', color: '#006FBD',
+                          border: '1px solid #006FBD', borderRadius: 6, fontWeight: 600,
+                          cursor: registryLoading ? 'wait' : 'pointer',
+                        }}>
+                  ⬆ PDF 직접 업로드
+                </button>
+                <input ref={uploadInputRef} type="file" accept="application/pdf,.pdf"
+                       style={{ display: 'none' }} onChange={handleUploadRegistry} />
+              </div>
               {registryLoading && (
-                <div className="daf-registry-hint">등기부등본 조회에 시간이 소요될 수 있습니다.</div>
+                <div className="daf-registry-hint">처리에 시간이 소요될 수 있습니다.</div>
               )}
               {registryResult && (
                 <div className={`daf-registry-result ${registryResult.error ? 'err' : 'ok'}`}>
@@ -472,6 +740,16 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
                       )}
                       {registryResult.cached && ' · 캐시 (재발급 비용 0)'}
                     </>
+                  )}
+                  {registryMatch?.address && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>
+                      ↳ <strong>매칭 주소</strong>: {registryMatch.address}
+                      {registryMatch.dong ? ` ${registryMatch.dong}동` : ''}
+                      {registryMatch.ho ? ` ${registryMatch.ho}호` : ''}
+                      <span style={{ color: '#9CA3AF', marginLeft: 6 }}>
+                        — 이 주소가 의도한 물건과 다르면 다시 조회하거나 PDF 직접 업로드를 사용하세요.
+                      </span>
+                    </div>
                   )}
                 </div>
               )}
@@ -492,8 +770,8 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
                     <option value="">{registryResult?.status === 'completed' ? '직접 선택' : '등기부 발급 후 자동 선택됩니다'}</option>
                     {areas.map((a) => (
                       <option key={a.id} value={a.id}>
-                        전용 {a.exclusive_m2.toFixed(0)}㎡
-                        {a.pyeong ? ` (${Math.round(a.pyeong)}평)` : ''}
+                        전용 {a.exclusive_m2.toFixed(2)}㎡
+                        {a.pyeong ? ` (${a.pyeong.toFixed(2)}평)` : ''}
                       </option>
                     ))}
                   </select>
@@ -504,8 +782,8 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
                       </span>
                     </div>
                   )}
-                  {selectedArea && derivedPyeong && (
-                    <div className="daf-hint">≈ 약 <strong>{derivedPyeong}평</strong></div>
+                  {selectedArea && derivedPyeongFloat != null && (
+                    <div className="daf-hint">≈ 약 <strong>{derivedPyeongFloat.toFixed(2)}평</strong></div>
                   )}
                 </>
               )}
@@ -551,7 +829,7 @@ export default function DirectAnalysisForm({ onAnalyze, loading }: DirectAnalysi
       </div>
 
       <button type="button" onClick={handleSubmit} disabled={submitting} className="daf-submit-btn">
-        {submitting ? '분석 중...' : '분석'}
+        {submitting ? submitLabelBusy : submitLabel}
       </button>
     </div>
   );

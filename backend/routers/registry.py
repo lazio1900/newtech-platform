@@ -12,7 +12,7 @@ import re
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -34,7 +34,6 @@ class RegistryRequestPayload(BaseModel):
     type: Optional[str] = "집합건물"
     listing_id: Optional[int] = None
     complex_id: Optional[int] = None  # backend 가 지번/도로명 후보 chain 구성용
-    building_name: Optional[str] = None  # Daum 우편번호 popup 의 buildingName (5·6 후보용)
     force_refresh: bool = False
 
 
@@ -75,7 +74,7 @@ def _strip_brackets(name: str) -> str:
     return " ".join(_BRACKETED_RE.sub("", name).split())
 
 
-def _build_address_candidates(complex_obj, daum_name: Optional[str] = None) -> list[str]:
+def _build_address_candidates(complex_obj) -> list[str]:
     """IROS 매칭률 ↑ 를 위한 후보 주소 (동·호는 upstream 이 별도 필드로 append).
 
     순서:
@@ -83,10 +82,7 @@ def _build_address_candidates(complex_obj, daum_name: Optional[str] = None) -> l
       2. 도로명 + 단지명(KB)
       3. 지번 + 단지명(KB, 괄호 제거)
       4. 도로명 + 단지명(KB, 괄호 제거)
-      5. 지번 + 단지명(Daum buildingName)
-      6. 도로명 + 단지명(Daum buildingName)
-    단지명에 괄호가 없으면 3·4 는 1·2 와, daum_name 이 KB 단지명과 같으면 5·6
-    도 앞 단계와 중복되어 dedupe 된다.
+    단지명에 괄호가 없으면 3·4 는 1·2 와 중복되어 dedupe 된다.
     """
     candidates: list[str] = []
     seen: set[str] = set()
@@ -100,7 +96,6 @@ def _build_address_candidates(complex_obj, daum_name: Optional[str] = None) -> l
     jibun = (complex_obj.address or "").strip()
     road = (complex_obj.road_address or "").strip()
     name = (complex_obj.name or "").strip()
-    daum = (daum_name or "").strip()
 
     variants: list[str] = []
     if name:
@@ -108,8 +103,6 @@ def _build_address_candidates(complex_obj, daum_name: Optional[str] = None) -> l
         stripped = _strip_brackets(name)
         if stripped and stripped != name:
             variants.append(stripped)
-    if daum:
-        variants.append(daum)
 
     for variant in variants:
         if jibun:
@@ -125,15 +118,13 @@ def request_registry(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """등기부 발급 요청. complex_id 가 있으면 6단계 후보 chain 으로 매칭률 ↑.
+    """등기부 발급 요청. complex_id 가 있으면 4단계 후보 chain 으로 매칭률 ↑.
 
     후보 순서 (complex_id 있을 때):
       1) 지번 + 단지명(KB) (+ 동·호)
       2) 도로명 + 단지명(KB) (+ 동·호)
       3) 지번 + 단지명(KB, 괄호 제거) (+ 동·호)
       4) 도로명 + 단지명(KB, 괄호 제거) (+ 동·호)
-      5) 지번 + 단지명(Daum buildingName) (+ 동·호)
-      6) 도로명 + 단지명(Daum buildingName) (+ 동·호)
 
     complex_id 없으면 payload.address 그대로 1회만 시도.
     각 후보를 순차 호출, "검색 결과 없음" 이면 다음 후보로. 첫 성공 시 즉시 반환.
@@ -141,7 +132,6 @@ def request_registry(
     body = payload.model_dump()
     # backend 내부 보강용 필드 제거 — upstream 등기부 API 가 모르는 키
     body.pop("complex_id", None)
-    body.pop("building_name", None)
     body["requester_id"] = str(user.id)
     if body.get("listing_id") is not None:
         body["listing_id"] = str(body["listing_id"])
@@ -151,7 +141,7 @@ def request_registry(
         from models.complex import Complex
         co = db.query(Complex).filter(Complex.id == payload.complex_id).first()
         if co:
-            candidates = _build_address_candidates(co, payload.building_name)
+            candidates = _build_address_candidates(co)
     if not candidates:
         candidates = [payload.address]
 
@@ -183,6 +173,10 @@ def request_registry(
             continue
 
         logger.warning(f"[registry] 후보#{idx} 매칭 성공: {cand} → ic_id={resp_json.get('ic_id')}")
+        # 매칭 검증용 — 사용자가 잘못된 등기부를 가져오는 사고 방지
+        resp_json["matched_address"] = cand
+        resp_json["matched_dong"] = payload.dong
+        resp_json["matched_ho"] = payload.ho
         return resp_json
 
     # 모든 후보 실패
@@ -191,6 +185,60 @@ def request_registry(
     if last_http_error is not None:
         raise HTTPException(status_code=last_http_error[0], detail=last_http_error[1])
     raise HTTPException(status_code=502, detail="등기부 API 통신 실패")
+
+
+@router.post("/upload")
+def upload_registry(
+    file: UploadFile = File(...),
+    address: str = Form(...),
+    dong: Optional[str] = Form(None),
+    ho: Optional[str] = Form(None),
+    type: str = Form("집합건물"),
+    listing_id: Optional[int] = Form(None),
+    user: User = Depends(get_current_user),
+):
+    """사용자 PDF 직접 업로드 — 등기부 마이크로서비스로 multipart forward.
+
+    응답에는 음수 ic_id 가 들어옴 (= 직접 업로드 식별). 평소 검색 흐름과 동일하게
+    registry_ic_id 로 분석/케이스 등록에 사용 가능.
+    """
+    content = file.file.read()
+    data = {
+        "address": address,
+        "type": type,
+        "requester_id": str(user.id),
+    }
+    if dong is not None:
+        data["dong"] = dong
+    if ho is not None:
+        data["ho"] = ho
+    if listing_id is not None:
+        data["listing_id"] = str(listing_id)
+
+    try:
+        with httpx.Client(timeout=settings.registry_request_timeout) as client:
+            r = client.post(
+                f"{settings.registry_api_url}/v1/registry/upload",
+                files={"file": (file.filename or "registry.pdf", content, file.content_type or "application/pdf")},
+                data=data,
+                headers=_registry_headers(),
+            )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"등기부 API 통신 실패: {e}")
+
+    if r.status_code >= 400:
+        try:
+            detail = r.json().get("detail", r.text)
+        except Exception:
+            detail = r.text
+        raise HTTPException(status_code=r.status_code, detail=detail)
+
+    resp_json = r.json()
+    resp_json["matched_address"] = address
+    resp_json["matched_dong"] = dong
+    resp_json["matched_ho"] = ho
+    resp_json["uploaded"] = True
+    return resp_json
 
 
 @router.get("/{ic_id}")

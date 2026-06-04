@@ -18,16 +18,17 @@ import PricePerPyeongChart from './PricePerPyeongChart';
 import LtvCalculation from './LtvCalculation';
 import AiComprehensiveOpinion from './AiComprehensiveOpinion';
 import { analyzeProperty } from '@/api/analysis';
-import { getApplications, updateApplicationStatus } from '@/api/applications';
+import { getApplications, submitApplication, updateApplication, updateApplicationStatus } from '@/api/applications';
 import { addMonitoringLoan } from '@/api/monitoring';
 import type { User, LoanApplication, AnalysisResponse } from '@/types/loan';
 import AdminPanel from './AdminPanel';
+import LendersPanel from './LendersPanel';
 import Settings from './Settings';
 import UserProfileMenu from './UserProfileMenu';
 import { getDefaultTab } from '@/lib/interfacePrefs';
 import './AuditorDashboard.css';
 
-type ActiveTab = 'dashboard' | 'direct' | 'applications' | 'monitoring' | 'my-account' | 'admin-users';
+type ActiveTab = 'dashboard' | 'direct' | 'lenders' | 'applications' | 'monitoring' | 'my-account' | 'admin-users';
 
 interface AuditorDashboardProps {
   user: User;
@@ -45,11 +46,19 @@ const STATUS_COLOR: Record<string, string> = {
 export default function AuditorDashboard({ user, onLogout }: AuditorDashboardProps) {
   const [activeTab, setActiveTab] = useState<ActiveTab>(getDefaultTab());
 
-  // 직접조회 상태
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
-  const [showRegistryModal, setShowRegistryModal] = useState<boolean>(false);
+  // 신청하기 폼 제출 상태
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  // 신청건 수정 모달
+  const [editingApp, setEditingApp] = useState<LoanApplication | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState<boolean>(false);
+  // 신청 목록 필터
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterText, setFilterText] = useState<string>('');
+  const [filterFromDate, setFilterFromDate] = useState<string>('');  // YYYY-MM-DD
+  const [filterToDate, setFilterToDate] = useState<string>('');
+  const [filterAmountMin, setFilterAmountMin] = useState<string>(''); // 억원 단위
+  const [filterAmountMax, setFilterAmountMax] = useState<string>('');
+  const [filterSort, setFilterSort] = useState<string>('created_desc');  // created_desc/created_asc/amount_desc/amount_asc
 
   // 신청건 상태
   const [applications, setApplications] = useState<LoanApplication[]>([]);
@@ -58,12 +67,6 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
   const [appAnalysisError, setAppAnalysisError] = useState<string | null>(null);
   const [appLoading, setAppLoading] = useState<boolean>(false);
   const [showAppRegistryModal, setShowAppRegistryModal] = useState<boolean>(false);
-
-  // 직접조회 대출금액, 금리, 대출기간
-  const [directLoanAmount, setDirectLoanAmount] = useState<number>(0);
-  const [directInterestRate, setDirectInterestRate] = useState<number>(7.5);
-  const [directLoanDuration, setDirectLoanDuration] = useState<number>(12);
-  const [directRegistryIcId, setDirectRegistryIcId] = useState<number | null>(null);
 
   // 심사역 종합 의견
   const [auditorOpinion, setAuditorOpinion] = useState<string>('');
@@ -91,37 +94,73 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
   };
 
   const handleAnalyze = async (payload: DirectAnalyzePayload) => {
-    setDirectLoanAmount(parseInt(String(payload.loanAmount)));
-    setDirectInterestRate(payload.interestRate);
-    setDirectLoanDuration(payload.duration);
-    setDirectRegistryIcId(payload.options.registry_ic_id ?? null);
-    setLoading(true);
-    setError(null);
+    if (!payload.ceoName.trim()) {
+      alert("선택한 대부업체의 대표자명이 비어 있어 신청할 수 없습니다. '대부업체 등록' 탭에서 대표자명을 먼저 채워주세요.");
+      return;
+    }
+    setSubmitting(true);
     try {
-      const response = await analyzeProperty(
-        payload.company,
-        payload.address,
-        payload.loanAmount,
-        {
-          complexId: payload.options.complex_id ?? null,
-          areaId: payload.options.area_id ?? null,
-          complexName: payload.options.complex_name ?? null,
-          pyeong: payload.options.pyeong ?? null,
-          registryIcId: payload.options.registry_ic_id ?? null,
-          interestRate: payload.interestRate,
-        },
-      );
-      setAnalysisData(response);
+      const res = await submitApplication({
+        company_name: payload.company,
+        ceo_name: payload.ceoName.trim(),
+        business_number: payload.businessNumber.trim() || null,
+        credit_score_nice: payload.creditScoreNice,
+        credit_score_kcb: payload.creditScoreKcb,
+        property_address: payload.address,
+        loan_amount: payload.loanAmount,
+        loan_duration: payload.duration,
+        complex_id: payload.options.complex_id ?? null,
+        complex_name: payload.options.complex_name ?? null,
+        area_id: payload.options.area_id ?? null,
+        pyeong: payload.options.pyeong ?? null,
+        dong: payload.dong || null,
+        ho: payload.ho || null,
+        registry_ic_id: payload.options.registry_ic_id ?? null,
+      });
+      alert(`신청건이 등록되었습니다 (ID: ${res.application?.id ?? '-'}). 대부업체 신청건 탭으로 이동합니다.`);
+      await fetchApplications();
+      setActiveTab('applications');
     } catch (err) {
-      const e = err as { code?: string; message?: string; response?: { data?: { detail?: string } } };
-      const isTimeout = e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message || '');
-      setError(
-        isTimeout
-          ? '분석에 시간이 오래 걸려 응답을 받지 못했습니다. 잠시 후 다시 시도해주세요.'
-          : (e?.response?.data?.detail || e?.message || '분석 중 오류가 발생했습니다.'),
-      );
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      alert(`신청 실패: ${e?.response?.data?.detail || e?.message || '알 수 없는 오류'}`);
     } finally {
-      setLoading(false);
+      setSubmitting(false);
+    }
+  };
+
+  const handleEditApp = async (payload: DirectAnalyzePayload) => {
+    if (!editingApp) return;
+    if (!payload.ceoName.trim()) {
+      alert("대표자명이 비어 있어 저장할 수 없습니다. '대부업체 등록' 탭에서 채워주세요.");
+      return;
+    }
+    setEditSubmitting(true);
+    try {
+      await updateApplication(editingApp.id, {
+        company_name: payload.company,
+        ceo_name: payload.ceoName.trim(),
+        business_number: payload.businessNumber.trim() || null,
+        credit_score_nice: payload.creditScoreNice,
+        credit_score_kcb: payload.creditScoreKcb,
+        property_address: payload.address,
+        loan_amount: payload.loanAmount,
+        loan_duration: payload.duration,
+        complex_id: payload.options.complex_id ?? null,
+        complex_name: payload.options.complex_name ?? null,
+        area_id: payload.options.area_id ?? null,
+        pyeong: payload.options.pyeong ?? null,
+        dong: payload.dong || null,
+        ho: payload.ho || null,
+        registry_ic_id: payload.options.registry_ic_id ?? null,
+      });
+      setEditingApp(null);
+      await fetchApplications();
+      alert('신청건이 수정되었습니다.');
+    } catch (err) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      alert(`수정 실패: ${e?.response?.data?.detail || e?.message || '알 수 없는 오류'}`);
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -313,11 +352,16 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
       <div className="final-actions">
         <button
           className="final-btn reject"
-          onClick={() => {
-            if (selectedApp) handleStatusUpdate(selectedApp.id, '반려');
+          onClick={async () => {
+            if (!selectedApp) return;
+            if (!window.confirm('반려하시겠습니까?')) return;
+            await handleStatusUpdate(selectedApp.id, '반려');
+            setSelectedApp(null);
+            setAppAnalysisData(null);
+            setAppAnalysisError(null);
           }}
         >
-          거절
+          반려
         </button>
         <button
           className="final-btn approve"
@@ -814,16 +858,29 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
             대시보드
           </button>
           <button
+            className={`sidebar-btn ${activeTab === 'lenders' ? 'active' : ''}`}
+            onClick={() => setActiveTab('lenders')}
+          >
+            대부업체 등록
+          </button>
+          <button
             className={`sidebar-btn ${activeTab === 'direct' ? 'active' : ''}`}
             onClick={() => setActiveTab('direct')}
           >
-            직접조회하기
+            신청하기
           </button>
           <button
             className={`sidebar-btn ${activeTab === 'applications' ? 'active' : ''}`}
-            onClick={() => setActiveTab('applications')}
+            onClick={() => {
+              // 신청건 탭 클릭 시 항상 목록으로 — 선택된 건/분석 결과 초기화
+              setSelectedApp(null);
+              setAppAnalysisData(null);
+              setAppAnalysisError(null);
+              setShowAppRegistryModal(false);
+              setActiveTab('applications');
+            }}
           >
-            대부업체 신청건
+            신청 목록
             {applications.filter(a => a.status === '접수완료').length > 0 && (
               <span className="badge">
                 {applications.filter(a => a.status === '접수완료').length}
@@ -928,56 +985,67 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
           </div>
         )}
 
-        {/* 직접조회하기 탭 */}
+        {/* 신청하기 탭 */}
         {activeTab === 'direct' && (
           <div className="direct-tab">
-            <DirectAnalysisForm onAnalyze={handleAnalyze} loading={loading} />
+            <DirectAnalysisForm onAnalyze={handleAnalyze} loading={submitting} />
+          </div>
+        )}
 
-            {(loading || analysisData || error) && (
-              <div
-                className="direct-result-modal-backdrop"
-                onClick={() => {
-                  if (loading) return;  // 분석 중엔 닫기 금지
-                  setAnalysisData(null);
-                  setError(null);
-                }}
-              >
-                <div
-                  className="direct-result-modal"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="direct-result-modal-header">
-                    <h3>분석 결과</h3>
-                    <button
-                      className="direct-result-close"
-                      disabled={loading}
-                      onClick={() => { setAnalysisData(null); setError(null); }}
-                      aria-label="닫기"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="direct-result-modal-body">
-                    {loading && (
-                      <div className="loading-message">
-                        <div className="spinner"></div>
-                        <p>분석 중입니다. 잠시만 기다려주세요...</p>
-                      </div>
-                    )}
-                    {error && !loading && (
-                      <div className="error-message">
-                        <p>{error}</p>
-                      </div>
-                    )}
-                    {analysisData && !loading && renderAnalysisResult(
-                      analysisData, showRegistryModal, setShowRegistryModal,
-                      directLoanAmount, directInterestRate, directLoanDuration,
-                      directRegistryIcId,
-                    )}
-                  </div>
-                </div>
+        {/* 대부업체 등록 탭 */}
+        {activeTab === 'lenders' && (
+          <LendersPanel />
+        )}
+
+        {/* 신청건 수정 모달 — 신청 폼 그대로 prefill */}
+        {editingApp && (
+          <div
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+              padding: 24, overflowY: 'auto',
+            }}
+            onClick={() => { if (!editSubmitting) setEditingApp(null); }}
+          >
+            <div
+              style={{
+                background: '#fff', borderRadius: 8, width: 960, maxWidth: '95vw',
+                maxHeight: '95vh', overflowY: 'auto', padding: 24,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 18, color: '#051C48', fontWeight: 700 }}>
+                  신청건 수정 — {editingApp.id}
+                </h3>
+                <button
+                  type="button" disabled={editSubmitting}
+                  onClick={() => setEditingApp(null)}
+                  style={{
+                    background: 'transparent', border: 'none', fontSize: 20,
+                    cursor: editSubmitting ? 'wait' : 'pointer', color: '#9CA3AF',
+                  }}
+                  aria-label="닫기"
+                >✕</button>
               </div>
-            )}
+              <DirectAnalysisForm
+                onAnalyze={handleEditApp}
+                loading={editSubmitting}
+                submitLabel="저장"
+                submitLabelBusy="저장 중..."
+                initial={{
+                  lenderBusinessNumber: editingApp.business_number ?? null,
+                  lenderCompanyName: editingApp.company_name,
+                  complexId: editingApp.complex_id ?? null,
+                  areaId: editingApp.area_id ?? null,
+                  dong: editingApp.dong ?? null,
+                  ho: editingApp.ho ?? null,
+                  registryIcId: editingApp.registry_ic_id ?? null,
+                  loanAmount: editingApp.loan_amount,
+                  loanDuration: editingApp.loan_duration,
+                }}
+              />
+            </div>
           </div>
         )}
 
@@ -989,7 +1057,162 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                 <h2>대부업체 신청 목록</h2>
                 {applications.length === 0 ? (
                   <p className="empty-text">접수된 신청건이 없습니다.</p>
-                ) : (
+                ) : (() => {
+                  const q = filterText.trim().toLowerCase();
+                  // 금액은 억원 단위 입력 → 원 단위로 변환해 비교
+                  const minWon = filterAmountMin.trim() ? Number(filterAmountMin) * 100000000 : null;
+                  const maxWon = filterAmountMax.trim() ? Number(filterAmountMax) * 100000000 : null;
+                  // 날짜는 YYYY-MM-DD 형식. created_at "YYYY-MM-DD HH:MM" 앞 10자 비교
+                  const filtered = applications.filter((a) => {
+                    if (filterStatus !== 'all' && a.status !== filterStatus) return false;
+                    if (q) {
+                      const hay = [a.id, a.company_name, a.ceo_name, a.complex_name || '', a.property_address || '']
+                        .join(' ').toLowerCase();
+                      if (!hay.includes(q)) return false;
+                    }
+                    if (minWon != null && (a.loan_amount ?? 0) < minWon) return false;
+                    if (maxWon != null && (a.loan_amount ?? 0) > maxWon) return false;
+                    if (filterFromDate) {
+                      const d = (a.created_at || '').slice(0, 10);
+                      if (d < filterFromDate) return false;
+                    }
+                    if (filterToDate) {
+                      const d = (a.created_at || '').slice(0, 10);
+                      if (d > filterToDate) return false;
+                    }
+                    return true;
+                  });
+                  // 정렬
+                  filtered.sort((x, y) => {
+                    if (filterSort === 'amount_desc') return (y.loan_amount ?? 0) - (x.loan_amount ?? 0);
+                    if (filterSort === 'amount_asc') return (x.loan_amount ?? 0) - (y.loan_amount ?? 0);
+                    if (filterSort === 'created_asc') return (x.created_at || '').localeCompare(y.created_at || '');
+                    return (y.created_at || '').localeCompare(x.created_at || '');  // created_desc default
+                  });
+                  const counts = applications.reduce<Record<string, number>>((m, a) => {
+                    m[a.status] = (m[a.status] || 0) + 1;
+                    return m;
+                  }, {});
+                  const todayStr = new Date().toISOString().slice(0, 10);
+                  const daysAgoStr = (n: number) => {
+                    const d = new Date(); d.setDate(d.getDate() - n);
+                    return d.toISOString().slice(0, 10);
+                  };
+                  const resetAll = () => {
+                    setFilterStatus('all'); setFilterText('');
+                    setFilterFromDate(''); setFilterToDate('');
+                    setFilterAmountMin(''); setFilterAmountMax('');
+                  };
+                  const isFiltered = filterStatus !== 'all' || filterText || filterFromDate
+                    || filterToDate || filterAmountMin || filterAmountMax;
+                  const inp = (extra?: React.CSSProperties): React.CSSProperties => ({
+                    padding: '6px 10px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 13, ...extra,
+                  });
+                  const chip = (active: boolean): React.CSSProperties => ({
+                    padding: '4px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+                    cursor: 'pointer', border: '1px solid', userSelect: 'none',
+                    background: active ? '#006FBD' : '#fff',
+                    color: active ? '#fff' : '#374151',
+                    borderColor: active ? '#006FBD' : '#D1D5DB',
+                  });
+                  return (
+                  <>
+                  {/* 빠른 프리셋 */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, color: '#6B7280', marginRight: 4 }}>빠른 필터:</span>
+                    <span style={chip(!isFiltered)} onClick={resetAll}>전체</span>
+                    <span
+                      style={chip(filterStatus === '접수완료' && !filterAmountMin && !filterAmountMax && !filterFromDate)}
+                      onClick={() => { resetAll(); setFilterStatus('접수완료'); }}
+                    >미결 ({counts['접수완료'] || 0})</span>
+                    <span
+                      style={chip(filterFromDate === todayStr && filterToDate === todayStr)}
+                      onClick={() => { setFilterFromDate(todayStr); setFilterToDate(todayStr); }}
+                    >오늘 접수</span>
+                    <span
+                      style={chip(filterFromDate === daysAgoStr(7) && !filterToDate)}
+                      onClick={() => { setFilterFromDate(daysAgoStr(7)); setFilterToDate(''); }}
+                    >최근 7일</span>
+                    <span
+                      style={chip(filterAmountMin === '5' && !filterAmountMax)}
+                      onClick={() => { setFilterAmountMin('5'); setFilterAmountMax(''); }}
+                    >고액 (5억+)</span>
+                  </div>
+                  {/* 상세 필터 */}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      value={filterText}
+                      onChange={(e) => setFilterText(e.target.value)}
+                      placeholder="신청번호/업체/대표/단지/주소"
+                      style={inp({ flex: 1, minWidth: 220 })}
+                    />
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                      style={inp()}
+                    >
+                      <option value="all">전체 상태</option>
+                      <option value="접수완료">접수완료 ({counts['접수완료'] || 0})</option>
+                      <option value="심사중">심사중 ({counts['심사중'] || 0})</option>
+                      <option value="승인">승인 ({counts['승인'] || 0})</option>
+                      <option value="반려">반려 ({counts['반려'] || 0})</option>
+                      <option value="보류">보류 ({counts['보류'] || 0})</option>
+                    </select>
+                    <select
+                      value={filterSort}
+                      onChange={(e) => setFilterSort(e.target.value)}
+                      style={inp()}
+                    >
+                      <option value="created_desc">최신순</option>
+                      <option value="created_asc">오래된순</option>
+                      <option value="amount_desc">금액 ↓</option>
+                      <option value="amount_asc">금액 ↑</option>
+                    </select>
+                    {isFiltered && (
+                      <button
+                        type="button"
+                        onClick={resetAll}
+                        style={{ ...inp(), background: '#fff', color: '#374151', cursor: 'pointer' }}
+                      >초기화</button>
+                    )}
+                    <span style={{ fontSize: 12, color: '#6B7280', marginLeft: 'auto' }}>
+                      {filtered.length} / {applications.length} 건
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, color: '#6B7280' }}>신청일:</span>
+                    <input
+                      type="date" value={filterFromDate}
+                      onChange={(e) => setFilterFromDate(e.target.value)}
+                      style={inp()}
+                    />
+                    <span style={{ color: '#9CA3AF' }}>~</span>
+                    <input
+                      type="date" value={filterToDate}
+                      onChange={(e) => setFilterToDate(e.target.value)}
+                      style={inp()}
+                    />
+                    <span style={{ fontSize: 12, color: '#6B7280', marginLeft: 12 }}>금액(억):</span>
+                    <input
+                      type="number" min={0} step={0.1}
+                      value={filterAmountMin}
+                      onChange={(e) => setFilterAmountMin(e.target.value)}
+                      placeholder="최소"
+                      style={inp({ width: 100 })}
+                    />
+                    <span style={{ color: '#9CA3AF' }}>~</span>
+                    <input
+                      type="number" min={0} step={0.1}
+                      value={filterAmountMax}
+                      onChange={(e) => setFilterAmountMax(e.target.value)}
+                      placeholder="최대"
+                      style={inp({ width: 100 })}
+                    />
+                  </div>
+                  {filtered.length === 0 ? (
+                    <p className="empty-text">필터 조건에 해당하는 신청건이 없습니다.</p>
+                  ) : (
                   <table className="app-table">
                     <thead>
                       <tr>
@@ -1004,10 +1227,11 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                         <th>신청일시</th>
                         <th>상태</th>
                         <th>심사</th>
+                        <th>수정</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {applications.map((app) => (
+                      {filtered.map((app) => (
                         <tr key={app.id}>
                           <td>{app.id}</td>
                           <td>{app.company_name}</td>
@@ -1031,11 +1255,27 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                               상세심사
                             </button>
                           </td>
+                          <td>
+                            <button
+                              type="button"
+                              onClick={() => setEditingApp(app)}
+                              style={{
+                                padding: '6px 12px', background: '#fff', color: '#006FBD',
+                                border: '1px solid #006FBD', borderRadius: 6,
+                                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                              }}
+                            >
+                              수정
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                )}
+                  )}
+                  </>
+                  );
+                })()}
               </div>
             ) : (
               <div className="app-detail">

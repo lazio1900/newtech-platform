@@ -6,7 +6,6 @@ export interface RegistryRequestIn {
   ho?: string | null;
   type?: string;        // 등기부등본 타입 (예: 토지/건물/집합)
   complex_id?: number | null;  // backend 가 지번/도로명 후보 chain 구성용
-  building_name?: string | null;  // Daum 우편번호 popup 의 buildingName (5·6 후보용)
   force_refresh?: boolean;
 }
 
@@ -18,6 +17,10 @@ export interface RegistryRequestOut {
   cost: number;
   cached: boolean;
   error_message: string | null;
+  // 4단계 chain 중 실제로 매칭에 성공한 후보 — 잘못된 등기부 가져왔을 때 확인용
+  matched_address?: string | null;
+  matched_dong?: string | null;
+  matched_ho?: string | null;
 }
 
 export interface RegistryAreaSuggestion {
@@ -38,6 +41,33 @@ export const registryApi = {
       '/api/registry/request',
       payload,
       { timeout: 240_000 },
+    );
+    return data;
+  },
+
+  /** PDF 직접 업로드 — IROS 검색 실패/우회 케이스. 음수 ic_id 로 발급분과 구분. */
+  upload: async (params: {
+    file: File;
+    address: string;
+    dong?: string | null;
+    ho?: string | null;
+    type?: string;
+  }): Promise<RegistryRequestOut> => {
+    const form = new FormData();
+    form.append('file', params.file);
+    form.append('address', params.address);
+    if (params.dong) form.append('dong', params.dong);
+    if (params.ho) form.append('ho', params.ho);
+    form.append('type', params.type || '집합건물');
+    const { data } = await apiClient.post<RegistryRequestOut>(
+      '/api/registry/upload',
+      form,
+      {
+        timeout: 60_000,
+        // FormData 인데 글로벌 default(application/json) 가 잡히면 boundary 없이 가서 422.
+        // 명시적으로 multipart 로 두면 axios 가 boundary 를 채워 넣는다.
+        headers: { 'Content-Type': 'multipart/form-data' },
+      },
     );
     return data;
   },

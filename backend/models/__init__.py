@@ -11,6 +11,7 @@ from models.loan import (
     ALLOWED_TRANSITIONS,
 )
 from models.audit import SearchHistory, AnalysisAuditLog, SearchField
+from models.lender import Lender
 from models.data_source_mapping import DataSourceMapping
 from models.db_connection import DbConnection
 from models.llm_connection import LlmConnection
@@ -44,6 +45,7 @@ __all__ = [
     "SearchHistory",
     "AnalysisAuditLog",
     "SearchField",
+    "Lender",
     "DataSourceMapping",
     "DbConnection",
     "LlmConnection",

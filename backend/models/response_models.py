@@ -14,19 +14,24 @@ class YearlyFinancial(BaseModel):
 
 
 class BorrowerInfo(BaseModel):
-    """차주 정보"""
+    """차주 정보 (대부업체)"""
     company_name: str  # 대부업체 명칭
-    business_number: str
-    financial_data: List[YearlyFinancial]  # 최근 3년 재무 데이터
+    business_number: Optional[str] = None
+    ceo_name: Optional[str] = None              # 대표자명
+    credit_score_nice: Optional[int] = None     # 대표자 NICE 신용점수
+    credit_score_kcb: Optional[int] = None      # 대표자 KCB 신용점수
+    direct_debt: Optional[int] = None           # 직접채무(원)
+    guarantee_debt: Optional[int] = None        # 보증채무(원)
+    financial_data: List[YearlyFinancial] = []  # 최근 3년 재무 데이터 — 마스터에 없으면 빈 리스트
 
 
 class GuarantorInfo(BaseModel):
-    """연대보증인 정보"""
-    name: str
-    credit_score_kcb: int
-    credit_score_nice: int
-    direct_debt: int
-    guarantee_debt: int
+    """연대보증인 정보 (대부업체 대표자) — lenders 마스터 매칭 시 채워짐"""
+    name: Optional[str] = None
+    credit_score_kcb: Optional[int] = None
+    credit_score_nice: Optional[int] = None
+    direct_debt: Optional[int] = None
+    guarantee_debt: Optional[int] = None
 
 
 class PropertyBasicInfo(BaseModel):

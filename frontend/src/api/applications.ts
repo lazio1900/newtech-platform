@@ -13,6 +13,9 @@ const STATUS_KO_TO_EN: Record<string, string> = {
 export interface SubmitApplicationPayload {
   company_name: string;
   ceo_name: string;
+  business_number?: string | null;
+  credit_score_nice?: number | null;
+  credit_score_kcb?: number | null;
   property_address: string;
   loan_amount: number;
   loan_duration?: number;
@@ -27,10 +30,21 @@ export interface SubmitApplicationPayload {
   registry_ic_id?: number | null;
 }
 
+export const updateApplication = async (
+  appId: string,
+  appData: SubmitApplicationPayload,
+): Promise<{ status: string; application?: LoanApplication }> => {
+  const { data } = await apiClient.put(`/api/applications/${appId}`, appData, { timeout: 60_000 });
+  return data;
+};
+
 export const submitApplication = async (
   appData: SubmitApplicationPayload,
 ): Promise<{ status: string; application?: LoanApplication }> => {
-  const { data } = await apiClient.post('/api/applications', appData);
+  // 케이스 등록 후 backend 가 prefetch AI 분석을 BackgroundTask 로 띄우는데,
+  // 그 시점에 일시 부하가 끼면 응답이 글로벌 30s 안에 못 와서 ECONNABORTED.
+  // 케이스 등록은 일반적으로 빠르므로 안전치만 넓힌다.
+  const { data } = await apiClient.post('/api/applications', appData, { timeout: 60_000 });
   return data;
 };
 

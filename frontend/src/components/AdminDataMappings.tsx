@@ -10,9 +10,10 @@ import {
   type EntityMeta,
   type TransformMeta,
   type FieldMappings,
+  type MappingPreviewResponse,
 } from '../api/adminDataMappings';
 import { adminDbApi, type DbConnection } from '../api/adminDb';
-import './AdminDataMappings.css';
+// 별도 CSS 파일 없이 인라인 스타일 + 기존 admin-* 클래스 재사용
 
 type DialogMode = null | 'create' | 'edit';
 
@@ -25,6 +26,9 @@ export default function AdminDataMappings() {
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogMode>(null);
   const [target, setTarget] = useState<DataMapping | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<DataMapping | null>(null);
+  const [previewResult, setPreviewResult] = useState<MappingPreviewResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true); setError(null);
@@ -116,6 +120,26 @@ export default function AdminDataMappings() {
                 </dl>
               </div>
               <div className="dmap-card-actions">
+                <button
+                  className="dmap-btn-ghost"
+                  onClick={async () => {
+                    setPreviewTarget(m);
+                    setPreviewResult(null);
+                    setPreviewLoading(true);
+                    try {
+                      const r = await adminDataMappingsApi.preview(m.id, 5);
+                      setPreviewResult(r);
+                    } catch (err) {
+                      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+                      setPreviewResult({
+                        status: 'error', sql: '',
+                        error: e?.response?.data?.detail || e?.message || '미리보기 실패',
+                      });
+                    } finally {
+                      setPreviewLoading(false);
+                    }
+                  }}
+                >미리보기</button>
                 <button className="dmap-btn-ghost" onClick={() => { setTarget(m); setDialog('edit'); }}>수정</button>
                 <button className="dmap-btn-ghost-danger" onClick={() => handleDelete(m)}>삭제</button>
               </div>
@@ -134,6 +158,118 @@ export default function AdminDataMappings() {
           onClose={() => setDialog(null)}
           onSaved={() => { setDialog(null); fetchAll(); }}
         />
+      )}
+
+      {previewTarget && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 24,
+          }}
+          onClick={() => { if (!previewLoading) { setPreviewTarget(null); setPreviewResult(null); } }}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 8, width: 1100, maxWidth: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid #E5E7EB', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#051C48' }}>
+                  미리보기 — {previewTarget.name}
+                </div>
+                <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>
+                  {previewTarget.logical_entity} · {previewTarget.source_table}
+                </div>
+              </div>
+              <button
+                onClick={() => { setPreviewTarget(null); setPreviewResult(null); }}
+                disabled={previewLoading}
+                style={{ background: 'transparent', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}
+                aria-label="닫기"
+              >✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+              {previewLoading && (
+                <div style={{ color: '#6B7280', fontSize: 13 }}>불러오는 중…</div>
+              )}
+              {!previewLoading && previewResult?.status === 'error' && (
+                <div>
+                  <div style={{ background: '#FEE2E2', color: '#991B1B', padding: 10, borderRadius: 4, marginBottom: 12, fontSize: 13 }}>
+                    {previewResult.error}
+                  </div>
+                  {previewResult.sql && (
+                    <pre style={{ background: '#F9FAFB', padding: 10, borderRadius: 4, fontSize: 12, overflowX: 'auto' }}>
+                      {previewResult.sql}
+                    </pre>
+                  )}
+                </div>
+              )}
+              {!previewLoading && previewResult?.status === 'success' && (
+                <div>
+                  <pre style={{ background: '#F9FAFB', padding: 10, borderRadius: 4, fontSize: 12, overflowX: 'auto', marginBottom: 12 }}>
+                    {previewResult.sql}
+                  </pre>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6, color: '#051C48' }}>
+                        외부 raw ({previewResult.columns?.length ?? 0}컬럼)
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, border: '1px solid #E5E7EB' }}>
+                        <thead>
+                          <tr>
+                            {previewResult.columns?.map((c) => (
+                              <th key={c} style={{ padding: 6, background: '#F9FAFB', borderBottom: '1px solid #E5E7EB', textAlign: 'left' }}>
+                                {c}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {previewResult.raw_rows?.map((row, i) => (
+                            <tr key={i} style={{ borderTop: '1px solid #F3F4F6' }}>
+                              {previewResult.columns?.map((c) => (
+                                <td key={c} style={{ padding: 6, color: '#374151' }}>
+                                  {row[c] == null ? <span style={{ color: '#9CA3AF' }}>null</span> : String(row[c])}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6, color: '#051C48' }}>
+                        표준 필드 변환 결과
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, border: '1px solid #E5E7EB' }}>
+                        <thead>
+                          <tr>
+                            {Object.keys(previewResult.transformed?.[0] ?? {}).map((c) => (
+                              <th key={c} style={{ padding: 6, background: '#F9FAFB', borderBottom: '1px solid #E5E7EB', textAlign: 'left' }}>
+                                {c}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {previewResult.transformed?.map((row, i) => (
+                            <tr key={i} style={{ borderTop: '1px solid #F3F4F6' }}>
+                              {Object.keys(previewResult.transformed?.[0] ?? {}).map((c) => (
+                                <td key={c} style={{ padding: 6, color: '#374151' }}>
+                                  {row[c] == null ? <span style={{ color: '#9CA3AF' }}>null</span> : String(row[c])}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

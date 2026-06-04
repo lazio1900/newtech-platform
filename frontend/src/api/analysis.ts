@@ -9,6 +9,10 @@ interface AnalyzeOptions {
   applicationId?: string | null;
   registryIcId?: number | null;
   interestRate?: number | null;
+  ceoName?: string | null;
+  businessNumber?: string | null;
+  creditScoreNice?: number | null;
+  creditScoreKcb?: number | null;
 }
 
 export const analyzeProperty = async (
@@ -29,6 +33,10 @@ export const analyzeProperty = async (
     application_id: options.applicationId ?? null,
     registry_ic_id: options.registryIcId ?? null,
     interest_rate: options.interestRate ?? null,
+    ceo_name: options.ceoName ?? null,
+    business_number: options.businessNumber ?? null,
+    credit_score_nice: options.creditScoreNice ?? null,
+    credit_score_kcb: options.creditScoreKcb ?? null,
   }, { timeout: 180_000 });
   return data.data;
 };

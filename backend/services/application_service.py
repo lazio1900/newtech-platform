@@ -19,6 +19,9 @@ def submit(
     property_address: str,
     loan_amount: int,
     loan_duration: int = 12,
+    business_number: Optional[str] = None,
+    credit_score_nice: Optional[int] = None,
+    credit_score_kcb: Optional[int] = None,
     complex_id: Optional[int] = None,
     complex_name: Optional[str] = None,
     area_id: Optional[int] = None,
@@ -33,6 +36,9 @@ def submit(
         applicant_user_id=applicant.id,
         company_name=company_name,
         ceo_name=ceo_name,
+        business_number=business_number,
+        credit_score_nice=credit_score_nice,
+        credit_score_kcb=credit_score_kcb,
         property_address=property_address,
         loan_amount=loan_amount,
         loan_duration=loan_duration,
@@ -71,6 +77,52 @@ def list_all(db: Session) -> list[LoanApplication]:
         .order_by(LoanApplication.created_at.desc())
         .all()
     )
+
+
+def update(
+    db: Session,
+    *,
+    app_id: str,
+    company_name: str,
+    ceo_name: str,
+    property_address: str,
+    loan_amount: int,
+    loan_duration: int = 12,
+    business_number: Optional[str] = None,
+    credit_score_nice: Optional[int] = None,
+    credit_score_kcb: Optional[int] = None,
+    complex_id: Optional[int] = None,
+    complex_name: Optional[str] = None,
+    area_id: Optional[int] = None,
+    exclusive_m2: Optional[float] = None,
+    pyeong: Optional[int] = None,
+    dong: Optional[str] = None,
+    ho: Optional[str] = None,
+    registry_ic_id: Optional[int] = None,
+) -> Optional[LoanApplication]:
+    """신청건 본문 수정. status / decided_at / applicant_user_id 는 건드리지 않는다."""
+    app = get_by_id(db, app_id)
+    if not app:
+        return None
+    app.company_name = company_name
+    app.ceo_name = ceo_name
+    app.business_number = business_number
+    app.credit_score_nice = credit_score_nice
+    app.credit_score_kcb = credit_score_kcb
+    app.property_address = property_address
+    app.loan_amount = loan_amount
+    app.loan_duration = loan_duration
+    app.complex_id = complex_id
+    app.complex_name = complex_name
+    app.area_id = area_id
+    app.exclusive_m2 = exclusive_m2
+    app.pyeong = pyeong
+    app.dong = dong
+    app.ho = ho
+    app.registry_ic_id = registry_ic_id
+    db.commit()
+    db.refresh(app)
+    return app
 
 
 def update_status(

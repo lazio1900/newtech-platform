@@ -177,8 +177,9 @@ function ConnectionDialog({ mode, target, onClose, onSaved }: {
   onSaved: () => void;
 }) {
   const [name, setName] = useState(target?.name || '');
+  const [driver, setDriver] = useState<string>(target?.driver || 'postgresql');
   const [host, setHost] = useState(target?.host || '');
-  const [port, setPort] = useState<string>(String(target?.port || 5432));
+  const [port, setPort] = useState<string>(String(target?.port || (target?.driver === 'oracle' ? 1521 : 5432)));
   const [database, setDatabase] = useState(target?.database || '');
   const [username, setUsername] = useState(target?.username || '');
   const [password, setPassword] = useState('');
@@ -191,12 +192,13 @@ function ConnectionDialog({ mode, target, onClose, onSaved }: {
   const handleSubmit = async () => {
     setSaving(true); setError(null);
     try {
+      const defaultPort = driver === 'oracle' ? 1521 : 5432;
       if (mode === 'create') {
         const payload: DbConnectionCreatePayload = {
           name: name.trim(),
-          driver: 'postgresql',
+          driver,
           host: host.trim(),
-          port: parseInt(port, 10) || 5432,
+          port: parseInt(port, 10) || defaultPort,
           database: database.trim(),
           username: username.trim(),
           password: password || null,
@@ -207,8 +209,9 @@ function ConnectionDialog({ mode, target, onClose, onSaved }: {
       } else if (target) {
         const payload: DbConnectionUpdatePayload = {
           name: name.trim(),
+          driver,
           host: host.trim(),
-          port: parseInt(port, 10) || 5432,
+          port: parseInt(port, 10) || defaultPort,
           database: database.trim(),
           username: username.trim(),
           password: password,
@@ -230,13 +233,28 @@ function ConnectionDialog({ mode, target, onClose, onSaved }: {
       <div className="db-dialog" onClick={(e) => e.stopPropagation()}>
         <h3 className="db-dialog-title">{mode === 'create' ? 'DB 연결 추가' : `연결 수정: ${target?.name}`}</h3>
         <div className="db-dialog-body">
-          <Field label="이름 *" hint="예: '운영 PostgreSQL', '분석 DW'">
+          <Field label="이름 *" hint="예: '운영 PostgreSQL', '사내망 Oracle'">
             <input className="db-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
           </Field>
           <div className="db-row">
+            <Field label="Driver *">
+              <select
+                className="db-input"
+                value={driver}
+                onChange={(e) => {
+                  const d = e.target.value;
+                  setDriver(d);
+                  // 기본 포트 자동 갱신 (사용자가 직접 안 바꿨을 때만 의미. 단순화로 매번 덮어씀)
+                  setPort(d === 'oracle' ? '1521' : '5432');
+                }}
+              >
+                <option value="postgresql">PostgreSQL</option>
+                <option value="oracle">Oracle</option>
+              </select>
+            </Field>
             <Field label="Host *">
               <input className="db-input" value={host} onChange={(e) => setHost(e.target.value)}
-                     placeholder="postgres.example.com" maxLength={200} />
+                     placeholder={driver === 'oracle' ? 'oracle.internal' : 'postgres.example.com'} maxLength={200} />
             </Field>
             <Field label="Port *">
               <input className="db-input" type="number" value={port} onChange={(e) => setPort(e.target.value)}
@@ -244,9 +262,10 @@ function ConnectionDialog({ mode, target, onClose, onSaved }: {
             </Field>
           </div>
           <div className="db-row">
-            <Field label="Database *">
+            <Field label={driver === 'oracle' ? 'Service Name *' : 'Database *'}
+                   hint={driver === 'oracle' ? '예: ORCL, XE — DSN host:port/service' : undefined}>
               <input className="db-input" value={database} onChange={(e) => setDatabase(e.target.value)}
-                     placeholder="kb_estate" maxLength={120} />
+                     placeholder={driver === 'oracle' ? 'XE' : 'kb_estate'} maxLength={120} />
             </Field>
             <Field label="User *">
               <input className="db-input" value={username} onChange={(e) => setUsername(e.target.value)}

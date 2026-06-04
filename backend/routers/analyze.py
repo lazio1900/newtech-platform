@@ -35,4 +35,8 @@ def analyze(
         application_id=request.application_id,
         registry_ic_id=request.registry_ic_id,
         interest_rate=request.interest_rate,
+        ceo_name=request.ceo_name,
+        business_number=request.business_number,
+        credit_score_nice=request.credit_score_nice,
+        credit_score_kcb=request.credit_score_kcb,
     )

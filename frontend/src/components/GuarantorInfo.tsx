@@ -4,6 +4,13 @@ interface GuarantorInfoProps {
   data: GuarantorData | null | undefined;
 }
 
+const NONE = '정보 없음';
+
+const formatAmount = (amount: number | null | undefined): string => {
+  if (amount == null) return NONE;
+  return `${(amount / 100000000).toFixed(1)}억원`;
+};
+
 export default function GuarantorInfo({ data }: GuarantorInfoProps) {
   if (!data) return null;
 
@@ -13,23 +20,27 @@ export default function GuarantorInfo({ data }: GuarantorInfoProps) {
       <div className="info-content">
         <div className="info-row">
           <span className="label">이름:</span>
-          <span className="value">{data.name}</span>
+          <span className="value">{data.name || NONE}</span>
         </div>
         <div className="info-row">
           <span className="label">신용점수 (KCB):</span>
-          <span className="value">{data.credit_score_kcb}점</span>
+          <span className="value">
+            {data.credit_score_kcb != null ? `${data.credit_score_kcb}점` : NONE}
+          </span>
         </div>
         <div className="info-row">
           <span className="label">신용점수 (NICE):</span>
-          <span className="value">{data.credit_score_nice}점</span>
+          <span className="value">
+            {data.credit_score_nice != null ? `${data.credit_score_nice}점` : NONE}
+          </span>
         </div>
         <div className="info-row">
           <span className="label">직접채무:</span>
-          <span className="value">{(data.direct_debt / 100000000).toFixed(1)}억원</span>
+          <span className="value">{formatAmount(data.direct_debt)}</span>
         </div>
         <div className="info-row">
           <span className="label">보증채무:</span>
-          <span className="value">{(data.guarantee_debt / 100000000).toFixed(1)}억원</span>
+          <span className="value">{formatAmount(data.guarantee_debt)}</span>
         </div>
       </div>
     </div>

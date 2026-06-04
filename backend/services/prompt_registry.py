@@ -83,27 +83,32 @@ PROMPT_REGISTRY: dict[str, FeatureMeta] = {
 }
 
 
-def get_prompt(db: Session, feature_key: str, prompt_key: str, default: str) -> str:
-    """DB override 우선, 없으면 default 반환. 모든 LLM 호출이 이 함수를 통해 system prompt 획득."""
-    row = (
+def _get_active(db: Session, feature_key: str, prompt_key: str) -> Optional[LlmPrompt]:
+    return (
         db.query(LlmPrompt)
-        .filter(LlmPrompt.feature_key == feature_key, LlmPrompt.prompt_key == prompt_key)
+        .filter(
+            LlmPrompt.feature_key == feature_key,
+            LlmPrompt.prompt_key == prompt_key,
+            LlmPrompt.is_active.is_(True),
+        )
         .first()
     )
+
+
+def get_prompt(db: Session, feature_key: str, prompt_key: str, default: str) -> str:
+    """활성 버전의 content 반환. 활성 버전이 없으면 default."""
+    row = _get_active(db, feature_key, prompt_key)
     if row and row.content:
         return row.content
     return default
 
 
 def list_prompts(db: Session) -> list[dict]:
-    """admin UI 용 — registry 의 모든 feature/key 조합에 대해 default 와 override 정보 반환."""
-    rows = db.query(LlmPrompt).all()
-    by_key = {(r.feature_key, r.prompt_key): r for r in rows}
-
+    """admin UI 용 — registry 의 모든 feature/key 조합에 대해 활성 버전 정보 반환."""
     items = []
     for fkey, fmeta in PROMPT_REGISTRY.items():
         for pkey, pmeta in fmeta["prompts"].items():
-            row = by_key.get((fkey, pkey))
+            row = _get_active(db, fkey, pkey)
             items.append({
                 "feature_key": fkey,
                 "feature_label": fmeta["label"],
@@ -112,50 +117,98 @@ def list_prompts(db: Session) -> list[dict]:
                 "prompt_label": pmeta["label"],
                 "prompt_description": pmeta["description"],
                 "has_override": row is not None,
-                "content": row.content if row else None,  # DB content (override 가 있을 때만)
+                "version": row.version if row else None,
+                "content": row.content if row else None,
                 "updated_at": row.updated_at.isoformat() if row else None,
                 "updated_by": row.updated_by if row else None,
             })
     return items
 
 
+def list_versions(db: Session, feature_key: str, prompt_key: str) -> list[dict]:
+    """해당 (feature, prompt) 의 전체 버전 이력 (최신 version 부터)."""
+    _ensure_known_key(feature_key, prompt_key)
+    rows = (
+        db.query(LlmPrompt)
+        .filter(LlmPrompt.feature_key == feature_key, LlmPrompt.prompt_key == prompt_key)
+        .order_by(LlmPrompt.version.desc())
+        .all()
+    )
+    return [r.to_dict() for r in rows]
+
+
 def set_prompt(
     db: Session, feature_key: str, prompt_key: str, content: str, updated_by: Optional[str]
 ) -> LlmPrompt:
-    """upsert. 같은 (feature, key) 가 있으면 content 갱신, 없으면 신규."""
+    """새 버전 insert. 같은 (feature, prompt) 의 기존 활성 row 는 비활성화한다."""
     _ensure_known_key(feature_key, prompt_key)
-    row = (
-        db.query(LlmPrompt)
-        .filter(LlmPrompt.feature_key == feature_key, LlmPrompt.prompt_key == prompt_key)
-        .first()
+
+    # 이전 활성 row 비활성화 (partial unique 충돌 방지)
+    prev = _get_active(db, feature_key, prompt_key)
+    next_version = 1
+    if prev:
+        prev.is_active = False
+        next_version = (prev.version or 0) + 1
+        db.flush()
+
+    # 같은 (feature, prompt, version) 행이 이미 있으면 다음 번호로 — 안전장치
+    while db.query(LlmPrompt).filter(
+        LlmPrompt.feature_key == feature_key,
+        LlmPrompt.prompt_key == prompt_key,
+        LlmPrompt.version == next_version,
+    ).first():
+        next_version += 1
+
+    row = LlmPrompt(
+        feature_key=feature_key,
+        prompt_key=prompt_key,
+        version=next_version,
+        is_active=True,
+        content=content,
+        updated_by=updated_by,
     )
-    if row:
-        row.content = content
-        row.updated_by = updated_by
-    else:
-        row = LlmPrompt(
-            feature_key=feature_key,
-            prompt_key=prompt_key,
-            content=content,
-            updated_by=updated_by,
-        )
-        db.add(row)
+    db.add(row)
     db.commit()
     db.refresh(row)
     return row
 
 
-def reset_prompt(db: Session, feature_key: str, prompt_key: str) -> bool:
-    """DB override 삭제 → 다음 호출부터 default 사용. 삭제 성공 여부 반환."""
+def activate_version(
+    db: Session, feature_key: str, prompt_key: str, version: int, updated_by: Optional[str]
+) -> Optional[LlmPrompt]:
+    """지정된 버전을 활성화하고 기존 활성 row 는 비활성화."""
     _ensure_known_key(feature_key, prompt_key)
-    row = (
+    target = (
         db.query(LlmPrompt)
-        .filter(LlmPrompt.feature_key == feature_key, LlmPrompt.prompt_key == prompt_key)
+        .filter(
+            LlmPrompt.feature_key == feature_key,
+            LlmPrompt.prompt_key == prompt_key,
+            LlmPrompt.version == version,
+        )
         .first()
     )
+    if not target:
+        return None
+    if target.is_active:
+        return target
+    prev = _get_active(db, feature_key, prompt_key)
+    if prev and prev.id != target.id:
+        prev.is_active = False
+        db.flush()
+    target.is_active = True
+    target.updated_by = updated_by
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+def reset_prompt(db: Session, feature_key: str, prompt_key: str) -> bool:
+    """현재 활성 버전을 비활성화 — 다음 호출부터 default 사용. 과거 버전은 보존."""
+    _ensure_known_key(feature_key, prompt_key)
+    row = _get_active(db, feature_key, prompt_key)
     if not row:
         return False
-    db.delete(row)
+    row.is_active = False
     db.commit()
     return True
 

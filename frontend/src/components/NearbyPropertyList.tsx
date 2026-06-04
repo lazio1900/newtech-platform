@@ -57,6 +57,7 @@ export default function NearbyPropertyList({ data }: NearbyPropertyListProps) {
         <table className="rights-table">
           <thead>
             <tr>
+              <th style={{ width: 40 }}>#</th>
               <th>단지명</th>
               <th>거리</th>
               <th>평형</th>
@@ -71,6 +72,15 @@ export default function NearbyPropertyList({ data }: NearbyPropertyListProps) {
           <tbody>
             {data.similar_properties.map((prop, idx) => (
               <tr key={idx}>
+                <td className="center">
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 24, height: 24, borderRadius: '50%',
+                    background: '#006FBD', color: '#fff', fontSize: 11, fontWeight: 700,
+                  }}>
+                    {idx + 1}
+                  </span>
+                </td>
                 <td>
                   <div style={{ fontWeight: 600 }}>{prop.name}</div>
                   <div style={{ fontSize: 10, color: '#888' }}>{prop.sigungu}</div>

@@ -1,7 +1,22 @@
-import React from 'react';
-import { MapContainer, TileLayer, CircleMarker, Tooltip } from 'react-leaflet';
+import L from 'leaflet';
+import { MapContainer, TileLayer, CircleMarker, Marker, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { NearbyPropertyTrends } from '@/types/loan';
+
+// 번호 마커 — 표 번호와 일치
+const numberedIcon = (n: number) =>
+  L.divIcon({
+    className: 'nearby-numbered-marker',
+    html: `<div style="
+      width:28px;height:28px;border-radius:50%;
+      background:#006FBD;color:#fff;
+      display:flex;align-items:center;justify-content:center;
+      font-size:12px;font-weight:700;
+      border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.4);
+    ">${n}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
 
 interface NearbyPropertyMapProps {
   data: NearbyPropertyTrends | null | undefined;
@@ -57,17 +72,16 @@ export default function NearbyPropertyMap({ data, targetAddress }: NearbyPropert
               </div>
             </Tooltip>
           </CircleMarker>
-          {/* 유사 물건 5개 - 파란 점 */}
+          {/* 유사 물건 - 번호 마커 (표와 매칭) */}
           {data.similar_properties.map((prop, idx) => (
-            <CircleMarker
+            <Marker
               key={idx}
-              center={[prop.lat, prop.lng]}
-              radius={8}
-              pathOptions={{ color: '#006FBD', fillColor: '#006FBD', fillOpacity: 0.75, weight: 2 }}
+              position={[prop.lat, prop.lng]}
+              icon={numberedIcon(idx + 1)}
             >
               <Tooltip direction="top">
                 <div style={{ fontSize: '12px', lineHeight: 1.6, minWidth: '160px' }}>
-                  <strong>{prop.name}</strong><br/>
+                  <strong>#{idx + 1} {prop.name}</strong><br/>
                   {prop.units}세대 / {prop.age}년 / {prop.area}평<br/>
                   최근가: {formatPrice(prop.recent_price)}<br/>
                   3개월 변동:{' '}
@@ -76,7 +90,7 @@ export default function NearbyPropertyMap({ data, targetAddress }: NearbyPropert
                   </span>
                 </div>
               </Tooltip>
-            </CircleMarker>
+            </Marker>
           ))}
         </MapContainer>
       </div>

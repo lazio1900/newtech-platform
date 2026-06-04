@@ -130,3 +130,111 @@ def delete_mapping(
     row = _get_or_404(db, mapping_id)
     data_source_mapping_service.delete_mapping(db, row)
     return {"status": "success"}
+
+
+class MappingPreviewRequest(BaseModel):
+    limit: int = Field(5, ge=1, le=50)
+
+
+@router.post("/{mapping_id}/preview")
+def preview_mapping(
+    mapping_id: int,
+    payload: MappingPreviewRequest,
+    _admin: User = Depends(require_role(UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    """매핑 정의된 외부 테이블에서 N rows SELECT 후 transform 적용 결과 반환.
+
+    안전상 컬럼/테이블 이름은 영숫자·_·. 만 허용 (식별자 화이트리스트).
+    """
+    import re
+    from services import db_connection_service
+    from services.data_transforms import apply as tx_apply
+
+    row = _get_or_404(db, mapping_id)
+    fm = data_source_mapping_service.parse_field_mappings(row)
+    if not fm:
+        raise HTTPException(status_code=400, detail="매핑된 필드가 없습니다.")
+
+    conn = db_connection_service.get_connection(db, row.source_db_connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="연결된 DB 연결이 없습니다.")
+
+    safe_ident = re.compile(r"^[A-Za-z0-9_.]+$")
+    if not safe_ident.match(row.source_table):
+        raise HTTPException(status_code=400, detail=f"안전하지 않은 테이블명: {row.source_table}")
+
+    columns: list[str] = []
+    target_to_source: dict[str, str] = {}
+    target_to_transform: dict[str, str] = {}
+    for target, m in fm.items():
+        sf = (m or {}).get("source_field")
+        if not sf:
+            continue
+        if not safe_ident.match(sf):
+            raise HTTPException(status_code=400, detail=f"안전하지 않은 컬럼명: {sf}")
+        if sf not in columns:
+            columns.append(sf)
+        target_to_source[target] = sf
+        target_to_transform[target] = (m or {}).get("transform") or "none"
+
+    if not columns:
+        raise HTTPException(status_code=400, detail="source_field 가 정의된 필드가 없습니다.")
+
+    cols_sql = ", ".join(columns)
+    if conn.driver == "oracle":
+        sql = f"SELECT {cols_sql} FROM {row.source_table} FETCH FIRST {payload.limit} ROWS ONLY"
+    else:
+        sql = f"SELECT {cols_sql} FROM {row.source_table} LIMIT {payload.limit}"
+
+    try:
+        db_conn = db_connection_service.open_raw_connection(conn)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"외부 DB 연결 실패: {type(e).__name__}: {e}")
+
+    try:
+        cur = db_conn.cursor()
+        try:
+            cur.execute(sql)
+            raw_rows = cur.fetchall()
+        finally:
+            cur.close()
+    except Exception as e:
+        return {
+            "status": "error",
+            "sql": sql,
+            "error": f"{type(e).__name__}: {str(e)[:300]}",
+        }
+    finally:
+        try:
+            db_conn.close()
+        except Exception:
+            pass
+
+    def jsonify(v):
+        from datetime import date as _d, datetime as _dt
+        from decimal import Decimal
+        if v is None or isinstance(v, (str, int, float, bool)):
+            return v
+        if isinstance(v, (_d, _dt)):
+            return v.isoformat()
+        if isinstance(v, Decimal):
+            return float(v)
+        return str(v)
+
+    raw_dicts = []
+    transformed = []
+    for r in raw_rows:
+        rd = {col: jsonify(r[i]) for i, col in enumerate(columns)}
+        raw_dicts.append(rd)
+        td = {target: jsonify(tx_apply(target_to_transform[target], rd[source]))
+              for target, source in target_to_source.items()}
+        transformed.append(td)
+
+    return {
+        "status": "success",
+        "sql": sql,
+        "columns": columns,
+        "raw_rows": raw_dicts,
+        "transformed": transformed,
+    }

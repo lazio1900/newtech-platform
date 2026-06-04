@@ -44,7 +44,7 @@ APPLICATION_STATUS_LABELS = {
 
 # 허용된 상태 전이
 ALLOWED_TRANSITIONS = {
-    ApplicationStatus.RECEIVED: {ApplicationStatus.REVIEWING, ApplicationStatus.REJECTED},
+    ApplicationStatus.RECEIVED: {ApplicationStatus.REVIEWING, ApplicationStatus.APPROVED, ApplicationStatus.REJECTED},
     ApplicationStatus.REVIEWING: {
         ApplicationStatus.APPROVED,
         ApplicationStatus.REJECTED,
@@ -67,6 +67,9 @@ class LoanApplication(Base):
     # 신청 시점 스냅샷 (사용자 프로필이 바뀌어도 이력은 보존)
     company_name = Column(String(200), nullable=False)
     ceo_name = Column(String(80), nullable=False)
+    business_number = Column(String(20), nullable=True, comment="사업자등록번호 (audit 직접조회 시 수기 입력)")
+    credit_score_nice = Column(Integer, nullable=True, comment="대표자 NICE 신용점수")
+    credit_score_kcb = Column(Integer, nullable=True, comment="대표자 KCB 신용점수")
     property_address = Column(String(500), nullable=False, comment="전체 주소(표시용)")
     loan_amount = Column(BigInteger, nullable=False)
     loan_duration = Column(Integer, nullable=False, default=12, comment="개월")
@@ -130,6 +133,9 @@ class LoanApplication(Base):
             "auditor_user_id": self.auditor_user_id,
             "company_name": self.company_name,
             "ceo_name": self.ceo_name,
+            "business_number": self.business_number,
+            "credit_score_nice": self.credit_score_nice,
+            "credit_score_kcb": self.credit_score_kcb,
             "property_address": self.property_address,
             "loan_amount": self.loan_amount,
             "loan_duration": self.loan_duration,

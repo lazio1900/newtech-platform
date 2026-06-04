@@ -4,7 +4,6 @@ import { submitApplication, getApplications } from '../api/applications';
 import { complexesApi } from '../api/complexes';
 import { regionsApi, RegionItem, DongItem } from '../api/regions';
 import { registryApi } from '../api/registry';
-import { pickDaumBuildingName } from '../lib/daumPostcode';
 import type { Area, Complex } from '@/types/complex';
 import Settings from './Settings';
 import UserProfileMenu from './UserProfileMenu';
@@ -58,8 +57,13 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
     status?: string; ic_id?: number | null; pdf_url?: string | null;
     cached?: boolean; error?: string | null;
   } | null>(null);
+  // 실제 매칭에 성공한 주소 (잘못된 등기부 가져왔는지 확인용)
+  const [registryMatch, setRegistryMatch] = useState<{
+    address?: string | null; dong?: string | null; ho?: string | null;
+  } | null>(null);
   // 등기부 표제부에서 추출된 전용면적 (자동 평형 제안용)
   const [registryExclusiveM2, setRegistryExclusiveM2] = useState<number | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   /** 등기부 발급 완료 후 표제부 면적 추출 + 가장 가까운 평형 자동 선택. */
   const applyAreaSuggestion = async (icId: number, complexId: number) => {
@@ -77,19 +81,63 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
     }
   };
 
+  const handleUploadRegistry = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!selectedComplex) { alert('단지를 먼저 선택해주세요.'); return; }
+
+    setRegistryLoading(true);
+    setRegistryResult(null);
+    setRegistryMatch(null);
+    setRegistryExclusiveM2(null);
+    try {
+      const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
+      const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
+      const res = await registryApi.upload({
+        file,
+        address: fullAddress,
+        dong: dong.trim() || null,
+        ho: ho.trim() || null,
+        type: '집합건물',
+      });
+      setRegistryResult({
+        status: res.status, ic_id: res.ic_id,
+        pdf_url: res.ic_id ? registryApi.pdfUrl(res.ic_id) : null,
+        cached: false, error: res.error_message,
+      });
+      setRegistryMatch({
+        address: `[직접 업로드] ${fullAddress}`,
+        dong: dong.trim() || null,
+        ho: ho.trim() || null,
+      });
+      if (res.ic_id) {
+        applyAreaSuggestion(res.ic_id, selectedComplex.id);
+      }
+    } catch (err) {
+      const ex = err as { response?: { data?: { detail?: string | { message?: string } } }; message?: string };
+      const detail = ex?.response?.data?.detail;
+      setRegistryResult({
+        error: (typeof detail === 'object' ? detail?.message : detail)
+            || ex?.message
+            || 'PDF 업로드 실패',
+      });
+    } finally {
+      setRegistryLoading(false);
+    }
+  };
+
   const handleFetchRegistry = async () => {
     if (!selectedComplex || !dong.trim() || !ho.trim()) return;
     setRegistryLoading(true);
     setRegistryResult(null);
+    setRegistryMatch(null);
     setRegistryExclusiveM2(null);
     try {
-      // backend 6단계 chain: 지번/도로명 × (KB 단지명 / KB 단지명 괄호 제거 / Daum buildingName).
+      // backend 4단계 chain: 지번/도로명 × (KB 단지명 / KB 단지명 괄호 제거).
       // payload.address 는 후보가 못 만들어진 예외 경로의 fallback.
       const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
       const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
-
-      // Daum 우편번호 popup 으로 buildingName 만 받아온다 (취소하면 null → 5·6 후보 skip).
-      const buildingName = await pickDaumBuildingName(selectedComplex.address || '');
 
       const res = await registryApi.request({
         address: fullAddress,
@@ -97,8 +145,14 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
         ho: ho.trim(),
         type: '집합건물',
         complex_id: selectedComplex.id,
-        building_name: buildingName,
       });
+      if (res.matched_address) {
+        setRegistryMatch({
+          address: res.matched_address,
+          dong: res.matched_dong ?? null,
+          ho: res.matched_ho ?? null,
+        });
+      }
 
       // 즉시 완료된 경우 (캐시 hit 등)
       if (res.status === 'completed' && res.ic_id) {
@@ -146,7 +200,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
           }
           // 'issuing' / 'requested' 면 계속 폴링
           setRegistryResult({ status: cur.status, ic_id: icId });
-        } catch (pollErr) {
+        } catch {
           // 일시 오류면 다음 폴링 시도
         }
       }
@@ -154,11 +208,12 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
         status: 'timeout', ic_id: icId,
         error: '발급이 3분 안에 완료되지 않았습니다. 잠시 후 다시 확인해주세요.',
       });
-    } catch (e: any) {
+    } catch (e) {
+      const err = e as { response?: { data?: { detail?: string | { message?: string } } }; message?: string };
+      const detail = err?.response?.data?.detail;
       setRegistryResult({
-        error: e?.response?.data?.detail?.message
-            || e?.response?.data?.detail
-            || e?.message
+        error: (typeof detail === 'object' ? detail?.message : detail)
+            || err?.message
             || '등기부등본 발급 요청에 실패했습니다',
       });
     } finally {
@@ -314,12 +369,12 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
     }
   };
 
-  const derivedPyeong = useMemo<number | null>(() => {
+  // 표시용(소숫점 2자리) / payload용(정수) 분리 — backend pyeong 컬럼은 Integer
+  const derivedPyeongFloat = useMemo<number | null>(() => {
     if (!selectedArea?.exclusive_m2) return null;
-    return selectedArea.pyeong
-      ? Math.round(selectedArea.pyeong)
-      : Math.round(selectedArea.exclusive_m2 / M2_PER_PYEONG);
+    return selectedArea.pyeong ?? selectedArea.exclusive_m2 / M2_PER_PYEONG;
   }, [selectedArea]);
+  const derivedPyeong = derivedPyeongFloat != null ? Math.round(derivedPyeongFloat) : null;
 
   // 단지 주소 — DB의 도로명/지번 주소 우선, 없으면 시도/시군구/동/단지명 조합
   const baseComplexAddress = (): string => {
@@ -685,24 +740,41 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
 
                   {/* 등기부등본 가져오기 */}
                   <div className="apply-field" style={{ marginTop: 12 }}>
-                    <button
-                      type="button"
-                      onClick={handleFetchRegistry}
-                      disabled={
-                        submitting || registryLoading ||
-                        !dong.trim() || !ho.trim()
-                      }
-                      style={{
-                        width: '100%', padding: '10px 16px',
-                        background: registryLoading ? '#7DCCE5' : '#006FBD',
-                        color: '#fff', border: 'none', borderRadius: 6,
-                        fontSize: 14, fontWeight: 600,
-                        cursor: registryLoading ? 'wait' : 'pointer',
-                        opacity: (!dong.trim() || !ho.trim()) ? 0.5 : 1,
-                      }}
-                    >
-                      {registryLoading ? '발급 요청 중...' : '📄 등기부등본 가져오기'}
-                    </button>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                      <button
+                        type="button"
+                        onClick={handleFetchRegistry}
+                        disabled={
+                          submitting || registryLoading ||
+                          !dong.trim() || !ho.trim()
+                        }
+                        style={{
+                          flex: 1, padding: '10px 16px',
+                          background: registryLoading ? '#7DCCE5' : '#006FBD',
+                          color: '#fff', border: 'none', borderRadius: 6,
+                          fontSize: 14, fontWeight: 600,
+                          cursor: registryLoading ? 'wait' : 'pointer',
+                          opacity: (!dong.trim() || !ho.trim()) ? 0.5 : 1,
+                        }}
+                      >
+                        {registryLoading ? '처리 중...' : '📄 등기부등본 가져오기'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => uploadInputRef.current?.click()}
+                        disabled={submitting || registryLoading}
+                        style={{
+                          padding: '10px 14px', background: '#fff', color: '#006FBD',
+                          border: '1px solid #006FBD', borderRadius: 6,
+                          fontSize: 14, fontWeight: 600,
+                          cursor: registryLoading ? 'wait' : 'pointer',
+                        }}
+                      >
+                        ⬆ PDF 직접 업로드
+                      </button>
+                      <input ref={uploadInputRef} type="file" accept="application/pdf,.pdf"
+                             style={{ display: 'none' }} onChange={handleUploadRegistry} />
+                    </div>
                     {registryLoading && (
                       <div style={{
                         marginTop: 6, fontSize: 12, color: '#6B7785', textAlign: 'center',
@@ -735,6 +807,13 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                               </>
                             )}
                             {registryResult.cached && ' · 캐시 (재발급 비용 0)'}
+                            {registryMatch?.address && (
+                              <div style={{ marginTop: 6, fontSize: 11, color: '#065F46' }}>
+                                ↳ <strong>매칭 주소</strong>: {registryMatch.address}
+                                {registryMatch.dong ? ` ${registryMatch.dong}동` : ''}
+                                {registryMatch.ho ? ` ${registryMatch.ho}호` : ''}
+                              </div>
+                            )}
                           </>
                         )}
                       </div>
@@ -767,7 +846,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                           {areas.map((a) => (
                             <option key={a.id} value={a.id}>
                               전용 {a.exclusive_m2.toFixed(2)}㎡
-                              {a.pyeong ? ` (${Math.round(a.pyeong)}평)` : ''}
+                              {a.pyeong ? ` (${a.pyeong.toFixed(2)}평)` : ''}
                               {a.supply_m2 ? ` · 공급 ${a.supply_m2.toFixed(2)}㎡` : ''}
                             </option>
                           ))}
@@ -779,7 +858,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                             </span>
                           </div>
                         )}
-                        {selectedArea && derivedPyeong && (
+                        {selectedArea && derivedPyeongFloat != null && (
                           <div className="field-hint">
                             ≈ 약 <strong>{derivedPyeong}평</strong>
                           </div>

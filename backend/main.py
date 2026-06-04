@@ -12,6 +12,7 @@ from core.config import assert_production_safe, settings
 from routers import (
     admin_data_mappings,
     admin_db,
+    admin_migration,
     admin_llm,
     admin_prompts,
     admin_users,
@@ -20,6 +21,7 @@ from routers import (
     auth,
     complexes,
     health,
+    lenders,
     monitoring,
     regions,
     registry,
@@ -51,6 +53,7 @@ app.include_router(health.router,        prefix="/api/health",        tags=["hea
 app.include_router(auth.router,          prefix="/api",               tags=["auth"])
 app.include_router(suggestions.router,   prefix="/api/suggestions",   tags=["suggestions"])
 app.include_router(applications.router,  prefix="/api/applications",  tags=["applications"])
+app.include_router(lenders.router,       prefix="/api/lenders",       tags=["lenders"])
 app.include_router(monitoring.router,    prefix="/api/monitoring",    tags=["monitoring"])
 app.include_router(analyze.router,       prefix="/api/analyze",       tags=["analyze"])
 app.include_router(complexes.router,     prefix="/api/complexes",     tags=["complexes"])
@@ -62,6 +65,7 @@ app.include_router(admin_llm.router,     prefix="/api/admin/llm/connections", ta
 app.include_router(admin_prompts.router, prefix="/api/admin/llm/prompts", tags=["admin-prompts"])
 app.include_router(admin_db.router,      prefix="/api/admin/db/connections", tags=["admin-db"])
 app.include_router(admin_data_mappings.router, prefix="/api/admin/data-mappings", tags=["admin-data-mappings"])
+app.include_router(admin_migration.router, prefix="/api/admin/migration", tags=["admin-migration"])
 
 
 @app.on_event("startup")

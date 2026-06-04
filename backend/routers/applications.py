@@ -149,6 +149,9 @@ class ApplicationCreateRequest(BaseModel):
     """신청자는 토큰의 사용자로 결정 (body의 applicant_id는 무시)."""
     company_name: str = Field(..., min_length=1, max_length=200)
     ceo_name: str = Field(..., min_length=1, max_length=80)
+    business_number: str | None = Field(None, max_length=20, description="사업자등록번호 (audit 직접조회 케이스 등록 시 수기 입력)")
+    credit_score_nice: int | None = Field(None, ge=0, le=1000, description="대표자 NICE 신용점수")
+    credit_score_kcb: int | None = Field(None, ge=0, le=1000, description="대표자 KCB 신용점수")
     property_address: str = Field(..., min_length=1, max_length=500)
     loan_amount: int = Field(..., gt=0)
     loan_duration: int = Field(12, ge=1, le=600)
@@ -170,6 +173,26 @@ class ApplicationStatusUpdateRequest(BaseModel):
     memo: str | None = Field(None, max_length=2000)
 
 
+class ApplicationUpdateRequest(BaseModel):
+    """신청건 본문 수정 — ApplicationCreateRequest 와 동일 필드. status 는 별도 라우트."""
+    company_name: str = Field(..., min_length=1, max_length=200)
+    ceo_name: str = Field(..., min_length=1, max_length=80)
+    business_number: str | None = Field(None, max_length=20)
+    credit_score_nice: int | None = Field(None, ge=0, le=1000)
+    credit_score_kcb: int | None = Field(None, ge=0, le=1000)
+    property_address: str = Field(..., min_length=1, max_length=500)
+    loan_amount: int = Field(..., gt=0)
+    loan_duration: int = Field(12, ge=1, le=600)
+    complex_id: int | None = None
+    complex_name: str | None = Field(None, max_length=200)
+    area_id: int | None = None
+    exclusive_m2: float | None = None
+    pyeong: int | None = Field(None, ge=1, le=300)
+    dong: str | None = Field(None, max_length=40)
+    ho: str | None = Field(None, max_length=40)
+    registry_ic_id: int | None = None
+
+
 @router.post("")
 def submit(
     request: ApplicationCreateRequest,
@@ -182,6 +205,9 @@ def submit(
         applicant=user,
         company_name=request.company_name,
         ceo_name=request.ceo_name,
+        business_number=request.business_number,
+        credit_score_nice=request.credit_score_nice,
+        credit_score_kcb=request.credit_score_kcb,
         property_address=request.property_address,
         loan_amount=request.loan_amount,
         loan_duration=request.loan_duration,
@@ -223,6 +249,39 @@ def status_options():
         {"value": s.value, "label": APPLICATION_STATUS_LABELS[s]}
         for s in ApplicationStatus
     ]
+
+
+@router.put("/{app_id}")
+def update_application(
+    app_id: str,
+    request: ApplicationUpdateRequest,
+    _: User = Depends(require_role(UserRole.AUDITOR, UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    """신청건 본문 수정. status / decided_at 은 별도 라우트로 변경."""
+    result = application_service.update(
+        db,
+        app_id=app_id,
+        company_name=request.company_name,
+        ceo_name=request.ceo_name,
+        business_number=request.business_number,
+        credit_score_nice=request.credit_score_nice,
+        credit_score_kcb=request.credit_score_kcb,
+        property_address=request.property_address,
+        loan_amount=request.loan_amount,
+        loan_duration=request.loan_duration,
+        complex_id=request.complex_id,
+        complex_name=request.complex_name,
+        area_id=request.area_id,
+        exclusive_m2=request.exclusive_m2,
+        pyeong=request.pyeong,
+        dong=request.dong,
+        ho=request.ho,
+        registry_ic_id=request.registry_ic_id,
+    )
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="신청건을 찾을 수 없습니다.")
+    return {"status": "success", "application": result.to_dict()}
 
 
 @router.put("/{app_id}/status")

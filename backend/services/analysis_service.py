@@ -6,11 +6,9 @@ from sqlalchemy.orm import Session
 
 from models.response_models import (
     AnalysisData, AnalysisResponse, AIAnalysis, RightsAnalysisDetail,
-    PropertyBasicInfo,
+    BorrowerInfo, GuarantorInfo, PropertyBasicInfo, YearlyFinancial,
 )
 from services.dummy_data import (
-    generate_borrower_info,
-    generate_guarantor_info,
     generate_property_basic_info,
     generate_property_rights_info,
     generate_credit_data,
@@ -79,6 +77,92 @@ def _build_real_property_basic_info(
     )
 
 
+def _build_borrower_and_guarantor(
+    *,
+    db: Optional[Session],
+    application_id: Optional[str],
+    company_name: str,
+    business_number: Optional[str],
+    ceo_name: Optional[str],
+    credit_score_nice: Optional[int],
+    credit_score_kcb: Optional[int],
+) -> tuple[BorrowerInfo, GuarantorInfo]:
+    """차주(대부업체) + 연대보증인(대표자) 정보를 lenders 마스터에서 한 번에 구성.
+
+    매칭 우선순위: application_id 스냅샷 → 사업자번호 → 명칭. 매칭되면 마스터값
+    그대로, 안 되면 입력/스냅샷 값만 채우고 빈 칸은 None — FE 가 '정보 없음' 표시.
+    """
+    seed_company = company_name
+    seed_biz = business_number
+    seed_ceo = ceo_name
+    seed_nice = credit_score_nice
+    seed_kcb = credit_score_kcb
+
+    if application_id and db is not None:
+        try:
+            from models.loan import LoanApplication
+            la = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
+            if la:
+                seed_company = seed_company or la.company_name
+                seed_biz = seed_biz or la.business_number
+                seed_ceo = seed_ceo or la.ceo_name
+                seed_nice = seed_nice if seed_nice is not None else la.credit_score_nice
+                seed_kcb = seed_kcb if seed_kcb is not None else la.credit_score_kcb
+        except Exception as e:
+            logger.warning(f"LoanApplication borrower 스냅샷 조회 실패: {e}")
+
+    lender = None
+    if db is not None and (seed_biz or seed_company):
+        try:
+            from models import Lender
+            if seed_biz:
+                lender = db.query(Lender).filter(Lender.business_number == seed_biz).first()
+            if lender is None and seed_company:
+                lender = db.query(Lender).filter(Lender.company_name == seed_company).first()
+        except Exception as e:
+            logger.warning(f"lender 마스터 조회 실패: {e}")
+
+    if lender:
+        financial = [YearlyFinancial(**f) for f in (lender.financial_data or [])]
+        borrower = BorrowerInfo(
+            company_name=lender.company_name,
+            business_number=lender.business_number,
+            ceo_name=lender.ceo_name,
+            credit_score_nice=lender.credit_score_nice,
+            credit_score_kcb=lender.credit_score_kcb,
+            direct_debt=lender.direct_debt,
+            guarantee_debt=lender.guarantee_debt,
+            financial_data=financial,
+        )
+        guarantor = GuarantorInfo(
+            name=lender.ceo_name,
+            credit_score_nice=lender.credit_score_nice,
+            credit_score_kcb=lender.credit_score_kcb,
+            direct_debt=lender.direct_debt,
+            guarantee_debt=lender.guarantee_debt,
+        )
+        return borrower, guarantor
+
+    borrower = BorrowerInfo(
+        company_name=seed_company or "",
+        business_number=seed_biz,
+        ceo_name=seed_ceo,
+        credit_score_nice=seed_nice,
+        credit_score_kcb=seed_kcb,
+        direct_debt=None,
+        guarantee_debt=None,
+        financial_data=[],
+    )
+    guarantor = GuarantorInfo(
+        name=seed_ceo,
+        credit_score_nice=seed_nice,
+        credit_score_kcb=seed_kcb,
+        direct_debt=None,
+        guarantee_debt=None,
+    )
+    return borrower, guarantor
+
+
 def perform_full_analysis(
     company_name: str,
     property_address: str,
@@ -91,6 +175,10 @@ def perform_full_analysis(
     application_id: Optional[str] = None,
     registry_ic_id: Optional[int] = None,
     interest_rate: Optional[float] = None,
+    ceo_name: Optional[str] = None,
+    business_number: Optional[str] = None,
+    credit_score_nice: Optional[int] = None,
+    credit_score_kcb: Optional[int] = None,
 ) -> AnalysisResponse:
     """전체 분석 수행 - 실 수집 데이터 우선, 없으면 더미 폴백.
 
@@ -124,9 +212,16 @@ def perform_full_analysis(
             logger.warning(f"실 데이터 조회 실패, 더미 폴백: {e}")
             real_data = None
 
-    # 1. 더미 데이터 생성 (실 데이터 없는 항목만)
-    borrower_info = generate_borrower_info(company_name)
-    guarantor_info = generate_guarantor_info()
+    # 1. 차주(대부업체) + 연대보증인(대표자) 정보 — lenders 마스터 한 번 조회로 둘 다 채움
+    borrower_info, guarantor_info = _build_borrower_and_guarantor(
+        db=db,
+        application_id=application_id,
+        company_name=company_name,
+        business_number=business_number,
+        ceo_name=ceo_name,
+        credit_score_nice=credit_score_nice,
+        credit_score_kcb=credit_score_kcb,
+    )
     property_rights_info = generate_property_rights_info(property_address)
 
     # 1-0. 등기부등본 LLM 권리 분석 — application_id 의 registry_ic_id 또는 명시적 registry_ic_id 사용

@@ -103,13 +103,21 @@ def delete_connection(db: Session, conn: DbConnection) -> None:
     db.commit()
 
 
+SUPPORTED_DRIVERS = ("postgresql", "oracle")
+
+
 def test_connection(conn: DbConnection) -> dict:
     """SELECT 1 호출. 성공 시 latency, 실패 시 error.
-    현재는 postgresql 만 지원.
+    지원 driver: postgresql, oracle.
     """
-    if conn.driver != "postgresql":
-        return {"ok": False, "error": f"지원하지 않는 driver: {conn.driver}"}
+    if conn.driver == "postgresql":
+        return _test_postgres(conn)
+    if conn.driver == "oracle":
+        return _test_oracle(conn)
+    return {"ok": False, "error": f"지원하지 않는 driver: {conn.driver}"}
 
+
+def _test_postgres(conn: DbConnection) -> dict:
     try:
         import psycopg2
     except ImportError:
@@ -135,3 +143,53 @@ def test_connection(conn: DbConnection) -> dict:
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
     return {"ok": True, "latency_ms": int((time.time() - t0) * 1000)}
+
+
+def _test_oracle(conn: DbConnection) -> dict:
+    try:
+        import oracledb  # thin mode (Oracle client 미설치 환경에서도 동작)
+    except ImportError:
+        return {"ok": False, "error": "oracledb 미설치"}
+
+    # database 필드를 service name 으로 해석 (사내망 Oracle 통상)
+    dsn = f"{conn.host}:{conn.port or 1521}/{conn.database}"
+    t0 = time.time()
+    try:
+        c = oracledb.connect(
+            user=conn.username,
+            password=conn.password or "",
+            dsn=dsn,
+            tcp_connect_timeout=5,
+        )
+        try:
+            cur = c.cursor()
+            cur.execute("SELECT 1 FROM DUAL")
+            cur.fetchone()
+            cur.close()
+        finally:
+            c.close()
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:300]}"}
+    return {"ok": True, "latency_ms": int((time.time() - t0) * 1000)}
+
+
+def open_raw_connection(conn: DbConnection):
+    """이후 어댑터/preview 에서 raw SELECT 호출 시 사용. caller 가 close() 책임.
+
+    반환 객체는 DB-API 2.0 호환 (cursor()/close()).
+    """
+    if conn.driver == "postgresql":
+        import psycopg2
+        return psycopg2.connect(
+            host=conn.host, port=conn.port, dbname=conn.database,
+            user=conn.username, password=conn.password or "", connect_timeout=5,
+        )
+    if conn.driver == "oracle":
+        import oracledb
+        return oracledb.connect(
+            user=conn.username,
+            password=conn.password or "",
+            dsn=f"{conn.host}:{conn.port or 1521}/{conn.database}",
+            tcp_connect_timeout=5,
+        )
+    raise ValueError(f"지원하지 않는 driver: {conn.driver}")

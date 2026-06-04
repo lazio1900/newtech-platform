@@ -76,12 +76,21 @@ def list_connections(
     return {"status": "success", "items": [_to_dict(c) for c in items]}
 
 
+def _validate_driver(driver: str) -> None:
+    if driver not in db_connection_service.SUPPORTED_DRIVERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"지원하지 않는 driver '{driver}'. 사용 가능: {', '.join(db_connection_service.SUPPORTED_DRIVERS)}",
+        )
+
+
 @router.post("")
 def create_connection(
     payload: DbConnCreate,
     _admin: User = Depends(require_role(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
+    _validate_driver(payload.driver)
     conn = db_connection_service.create_connection(
         db,
         name=payload.name,
@@ -112,6 +121,8 @@ def update_connection(
     db: Session = Depends(get_db),
 ):
     conn = _get_or_404(db, conn_id)
+    if payload.driver is not None:
+        _validate_driver(payload.driver)
     conn = db_connection_service.update_connection(
         db, conn,
         name=payload.name,

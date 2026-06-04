@@ -338,11 +338,11 @@ body {
 }
 
 .final-btn.approve {
-  background-color: #006FBD;
+  background-color: #20c997;
 }
 
 .final-btn.approve:hover {
-  background-color: #005A9E;
+  background-color: #17a986;
 }
 
 .final-btn.reject {

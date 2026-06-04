@@ -5,9 +5,14 @@ from pydantic import BaseModel, Field
 
 class AnalysisRequest(BaseModel):
     """대출 분석 요청 모델"""
-    company_name: str = Field(..., description="업체명")
+    company_name: str = Field(..., description="업체명 (대부업체 명칭)")
     property_address: str = Field(..., description="담보주소")
     loan_amount: int = Field(..., gt=0, description="대출신청금액")
+    # 차주(대부업체) 추가 정보 — 직접조회 폼에서 audit 가 수기 입력
+    ceo_name: Optional[str] = Field(None, max_length=80, description="대표자명")
+    business_number: Optional[str] = Field(None, max_length=20, description="사업자등록번호")
+    credit_score_nice: Optional[int] = Field(None, ge=0, le=1000, description="대표자 NICE 신용점수")
+    credit_score_kcb: Optional[int] = Field(None, ge=0, le=1000, description="대표자 KCB 신용점수")
     # 신청건에서 분석 시 정확 매칭용 (없으면 BE가 주소로 fuzzy 매칭)
     complex_id: Optional[int] = Field(None, description="단지 ID (정확 매칭용)")
     area_id: Optional[int] = Field(None, description="평형 ID (정확 매칭용)")

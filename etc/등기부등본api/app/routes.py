@@ -1,7 +1,9 @@
 import os
-from datetime import date
+import uuid
+from datetime import date, datetime
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -56,6 +58,70 @@ def request_registry(payload: RegistryRequestIn, db: Session = Depends(get_db)):
             status_code=code_map.get(e.code, 400),
             detail={"code": e.code, "message": e.message},
         )
+    return _to_out(row)
+
+
+@router.post("/upload", response_model=RegistryRequestOut)
+def upload_registry(
+    file: UploadFile = File(...),
+    address: str = Form(...),
+    dong: Optional[str] = Form(None),
+    ho: Optional[str] = Form(None),
+    type: str = Form("집합건물"),
+    requester_id: Optional[str] = Form(None),
+    listing_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """사용자가 직접 PDF 를 업로드 — IROS 검색 실패/우회 케이스.
+
+    음수 ic_id 로 발급분과 구분 (= -row.id). PDF 시그니처(%PDF) 검사로 잘못된 업로드 차단.
+    """
+    name = (file.filename or "").lower()
+    if file.content_type not in ("application/pdf",) and not name.endswith(".pdf"):
+        raise HTTPException(400, {"code": "not_pdf", "message": "PDF 파일만 업로드 가능합니다."})
+
+    content = file.file.read()
+    if not content.startswith(b"%PDF"):
+        raise HTTPException(400, {"code": "bad_pdf", "message": "PDF 시그니처가 아닙니다."})
+
+    os.makedirs(settings.STORAGE_DIR, exist_ok=True)
+    tmp_path = os.path.join(settings.STORAGE_DIR, f"upload_{uuid.uuid4().hex}.pdf")
+    with open(tmp_path, "wb") as f:
+        f.write(content)
+
+    # address_norm UNIQUE 충돌 회피 — 직접 업로드는 매번 별개 행
+    suffix = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    address_norm = f"manual_upload__{address.strip()}__{suffix}"
+
+    row = RegistryRequest(
+        address=address,
+        dong=dong,
+        ho=ho,
+        type=type,
+        address_norm=address_norm,
+        issued_date=date.today(),
+        status="completed",
+        pdf_path=tmp_path,
+        cost=0,
+        requester_id=requester_id,
+        listing_id=listing_id,
+        completed_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    # ic_id = -id (음수 = 직접 업로드). PDF 파일명도 그에 맞춰 rename.
+    row.ic_id = -int(row.id)
+    new_pdf_path = os.path.join(settings.STORAGE_DIR, f"{row.ic_id}.pdf")
+    try:
+        os.rename(tmp_path, new_pdf_path)
+        row.pdf_path = new_pdf_path
+    except OSError:
+        pass  # rename 실패해도 tmp_path 그대로 사용 가능
+    db.commit()
+    db.refresh(row)
+
     return _to_out(row)
 
 

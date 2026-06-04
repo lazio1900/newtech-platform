@@ -39,6 +39,29 @@ services:
     volumes:
       - mineru_models:/models
 
+  registry-api:
+    build:
+      context: ./etc/등기부등본api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ./etc/등기부등본api/.env
+        required: true
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-kb_user}:${POSTGRES_PASSWORD:-kb_password}@postgres:5432/${POSTGRES_DB:-kb_estate}
+      STORAGE_DIR: /app/storage/pdf
+      # 컨테이너 dns — 호스트 매핑 8200 이 아니라 mineru 컨테이너 내부 포트 8000 사용
+      MINERU_API_URL: http://mineru-api:8000
+    volumes:
+      - ./etc/등기부등본api/storage/pdf:/app/storage/pdf
+    ports:
+      - "${REGISTRY_PORT:-8100}:8100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mineru-api:
+        condition: service_started
+
   backend:
     build:
       context: ./backend
@@ -51,6 +74,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-kb_user}:${POSTGRES_PASSWORD:-kb_password}@postgres:5432/${POSTGRES_DB:-kb_estate}
       REDIS_URL: redis://redis:6379/0
       MINERU_API_URL: http://mineru-api:8000
+      REGISTRY_API_URL: http://registry-api:8100
     ports:
       - "${BACKEND_PORT:-8002}:8002"
     depends_on:
@@ -59,6 +83,8 @@ services:
       redis:
         condition: service_healthy
       mineru-api:
+        condition: service_started
+      registry-api:
         condition: service_started
 
   frontend:

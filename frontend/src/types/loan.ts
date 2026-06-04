@@ -46,31 +46,36 @@ export interface PropertyRightsData {
   tenant_deposit?: number;
 }
 
-// 차주 재무 데이터 (연도별)
+// 차주 재무 데이터 (연도별). lender 마스터 입력값이 부분일 수 있어 모두 nullable.
 export interface FinancialYearData {
   year: number;
-  assets: number;
-  liabilities: number;
-  equity: number;
-  revenue: number;
-  operating_profit: number;
-  net_income: number;
+  assets: number | null;
+  liabilities: number | null;
+  equity: number | null;
+  revenue: number | null;
+  operating_profit: number | null;
+  net_income: number | null;
 }
 
-// 차주 정보
+// 차주 정보 (대부업체)
 export interface BorrowerData {
   company_name: string;
-  business_number: string;
+  business_number?: string | null;
+  ceo_name?: string | null;
+  credit_score_nice?: number | null;
+  credit_score_kcb?: number | null;
+  direct_debt?: number | null;
+  guarantee_debt?: number | null;
   financial_data: FinancialYearData[];
 }
 
-// 연대보증인 정보
+// 연대보증인 정보 (대부업체 대표자) — lenders 마스터 매칭 안 되면 빈 칸일 수 있음
 export interface GuarantorData {
-  name: string;
-  credit_score_kcb: number;
-  credit_score_nice: number;
-  direct_debt: number;
-  guarantee_debt: number;
+  name?: string | null;
+  credit_score_kcb?: number | null;
+  credit_score_nice?: number | null;
+  direct_debt?: number | null;
+  guarantee_debt?: number | null;
 }
 
 // KB 시세
@@ -128,6 +133,9 @@ export interface LoanApplication {
   auditor_user_id?: number | null;
   company_name: string;
   ceo_name: string;
+  business_number?: string | null;
+  credit_score_nice?: number | null;
+  credit_score_kcb?: number | null;
   property_address: string;
   loan_amount: number;
   loan_duration: number;

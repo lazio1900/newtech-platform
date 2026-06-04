@@ -39,8 +39,15 @@ def parse_area_from_address(address: str) -> str:
     return "기타"
 
 
-def generate_borrower_info(company_name: str) -> BorrowerInfo:
-    """차주 정보 생성 (대부업체 3년 재무 데이터)"""
+def generate_borrower_info(
+    company_name: str,
+    *,
+    ceo_name: str | None = None,
+    business_number: str | None = None,
+    credit_score_nice: int | None = None,
+    credit_score_kcb: int | None = None,
+) -> BorrowerInfo:
+    """차주 정보 생성. 재무 데이터는 더미, 식별·신용 정보는 입력값 우선."""
     current_year = date.today().year
 
     # 기준 재무 규모 설정 (억 단위)
@@ -72,8 +79,11 @@ def generate_borrower_info(company_name: str) -> BorrowerInfo:
 
     return BorrowerInfo(
         company_name=company_name,
-        business_number=f"{random.randint(100, 999)}-{random.randint(10, 99)}-{random.randint(10000, 99999)}",
-        financial_data=financial_data
+        business_number=business_number or f"{random.randint(100, 999)}-{random.randint(10, 99)}-{random.randint(10000, 99999)}",
+        ceo_name=ceo_name,
+        credit_score_nice=credit_score_nice,
+        credit_score_kcb=credit_score_kcb,
+        financial_data=financial_data,
     )
 
 
