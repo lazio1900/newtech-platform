@@ -107,7 +107,10 @@ get_rights_data(db, app):
 ## 10. 외부 테스트 픽스처 (사내 반입 전 검증)
 
 사내 정보계 반입 전, **케이스 샘플(`etc/테이블/등기부등본/샘플/`, 로컬 전용·미커밋)을 앱 PG `nice_rles_*` 에 적재**해 `registry_db_service` 를 실데이터로 검증한다.
-- 로더: `backend/scripts/load_nice_samples.py` (개발 한정 — 6테이블 drop+create 후 xlsx 적재, stdlib 파싱). 실행: `DATABASE_URL=...@localhost:5433/kb_estate python scripts/load_nice_samples.py`.
+- 로더1 (xlsx): `backend/scripts/load_nice_samples.py` (개발 한정 — 6테이블 drop+create 후 xlsx 적재, stdlib 파싱). 실행: `DATABASE_URL=...@localhost:5433/kb_estate python scripts/load_nice_samples.py`.
+- 로더2 (PDF): `backend/scripts/load_pdf_as_nice.py` — **임의 등기부 PDF → MinerU→LLM 추출(`extract_rights_dict`)→`nice_rles_*` explode** 적재. NICE 샘플 3건 외 어떤 PDF로도 db경로 테스트·브리지. 구조키(NICE_MSGM_NO 등) 합성, 빌더가 쓰는 텍스트 필드만 채움. (컨테이너 실행 권장 — MinerU/LLM 도달.) **사실상 "PDF 업로드→db경로"** — 폐쇄망에서 NICE DB에 없는 물건의 브리지로 승격 가능.
+  - 검증(CASE1 PDF): MinerU 10,661자 → LLM → build `max_bond=141,000,000` (xlsx 경로와 수렴). **신선도 실증**: PDF(6/5)는 압류 1건 포함, xlsx DB스냅샷(4/13)은 0건 — step4 §5-1 그대로.
+  - 추출 코어는 `ai_rights_analysis_service.extract_rights_dict(db, text, label)` 로 분리(ic_id 경로와 공유, 실패·빈 추출은 캐시 안 함).
 - **검증 결과(2026-06-05)**: CASE1 `max_bond_amount=141,000,000`(근저당 66M+75M, 질권 60M 제외) ✓ PDF 검산 일치 · CASE2 75,600,000(소유권외 12건) · CASE3 1,623,600,000. 소유자/지분/도로명주소/실명번호 마스킹 정상.
 - **이 테스트가 잡은 골격 스키마 교정**(실 명세 대조): ① 자식 테이블은 `NICE_MSGM_NO`(전문관리번호, 샘플 10자리)+`RLES_UNQ_NO` 복합키 → **최신 스냅샷(기본행 IQRY_DT 최대)의 MSGM 으로 조인**(단일 rles_unq_no 필터는 다중조회 오염) ② 상세(CCRG_D)는 `CCRG_RANK_NO`(RGTY_RANK_NO 아님)·`RGTY_PRPS_CD` 없음 ③ 표제부 `HDR_CTNT` 는 명세상 NUMBER 이나 실제 텍스트(주소·호·면적) ④ 주소는 표제부 `C12` 도로명/`C11` 지번 평문(소재지 `LCTN_ADDR` 는 base64 암호문) ⑤ `NICE_MSGM_NO` 길이 명세 14 vs 샘플 10 드리프트.
 - 남은 관찰: CASE2 는 표제부 샘플이 비어 주소 빈값(샘플 특성). 필요 시 `LND_LCTN_ADDR` 폴백 검토.
