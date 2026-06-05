@@ -14,7 +14,7 @@
 
 **왜 ETL이 결국 필요한가:** 앱은 수집기 소유 테이블을 read-only 로만 읽는다(ADR-002). 그래서 Oracle 원천을 앱이 직접 읽지 않고, **수집기(newtech_data)가 Oracle→`kb_estate`(공유 PostgreSQL)로 업서트**하면 앱은 기존처럼 `kb_estate`를 read-only 로 읽는다. = 읽기쓰루가 아니라 수집기 쪽 ETL 동기화.
 
-**진행 상태:** step1(매핑) ✅ · step2(ETL 사양) ✅ · step3(좌표/지오코딩 전략) ✅ · step4(등기부 NICE DB 통합 사양) ✅ · **step5(registry_db_service 설계) ✅** · **1번 구현(신청 `rles_unq_no` 컬럼) ✅ 반영완료** → 다음 = **registry_db_service 골격 구현**(step5 §8, 피처플래그 뒤) + 수집기 6테이블 ETL.
+**진행 상태:** step1(매핑) ✅ · step2(ETL 사양) ✅ · step3(좌표/지오코딩 전략) ✅ · step4(등기부 NICE DB 통합 사양) ✅ · step5(registry_db_service 설계) ✅ · 1번 구현(신청 `rles_unq_no` 컬럼) ✅ 반영완료 · **2번 골격(registry_db_service, 피처플래그 뒤 `registry_source=pdf`) ✅ `c05ca4a`** → 다음(인레포·사내무관) = FE 신선도 배지 + 존재가드 FE 배선 + 수집기 6테이블 ETL. DB경로 활성화는 사내 실DDL·복호모듈 입수 후 `registry_source=db`.
 
 ---
 
