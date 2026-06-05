@@ -104,9 +104,17 @@ get_rights_data(db, app):
 - **지금 작성 가능**(피처플래그 `pdf` 기본이면 현 동작 무변화): `registry_db_service`/`registry_nice` ORM/디스패처/존재 가드 라우터/설정/요약 프롬프트 — **가정 스키마(step4 §2 역산) 기준**. 단위 빌드 로직·요약은 코드로 완성, 컴파일·기동 검증 가능.
 - **사내에서만 검증**: 실 DDL·물리 테이블/컬럼명, 공통코드 master, 복호 모듈/키(주소·RNNO), 6테이블 실접속(ETL 적재 후). → 코드에 시임으로 표시, 실값 들어오면 상수맵/접속만 교체.
 
-## 10. 다음 단계
+## 10. 외부 테스트 픽스처 (사내 반입 전 검증)
 
-1. ADR-011(NICE 6테이블 소유권) 초안 → `docs/architecture-decisions.md`.
-2. `registry_nice.py` ORM + `registry_db_service` 결정적층 → 요약층 → 디스패처/플래그 → 존재 가드 순으로 골격 구현(피처플래그 뒤).
+사내 정보계 반입 전, **케이스 샘플(`etc/테이블/등기부등본/샘플/`, 로컬 전용·미커밋)을 앱 PG `nice_rles_*` 에 적재**해 `registry_db_service` 를 실데이터로 검증한다.
+- 로더: `backend/scripts/load_nice_samples.py` (개발 한정 — 6테이블 drop+create 후 xlsx 적재, stdlib 파싱). 실행: `DATABASE_URL=...@localhost:5433/kb_estate python scripts/load_nice_samples.py`.
+- **검증 결과(2026-06-05)**: CASE1 `max_bond_amount=141,000,000`(근저당 66M+75M, 질권 60M 제외) ✓ PDF 검산 일치 · CASE2 75,600,000(소유권외 12건) · CASE3 1,623,600,000. 소유자/지분/도로명주소/실명번호 마스킹 정상.
+- **이 테스트가 잡은 골격 스키마 교정**(실 명세 대조): ① 자식 테이블은 `NICE_MSGM_NO`(전문관리번호, 샘플 10자리)+`RLES_UNQ_NO` 복합키 → **최신 스냅샷(기본행 IQRY_DT 최대)의 MSGM 으로 조인**(단일 rles_unq_no 필터는 다중조회 오염) ② 상세(CCRG_D)는 `CCRG_RANK_NO`(RGTY_RANK_NO 아님)·`RGTY_PRPS_CD` 없음 ③ 표제부 `HDR_CTNT` 는 명세상 NUMBER 이나 실제 텍스트(주소·호·면적) ④ 주소는 표제부 `C12` 도로명/`C11` 지번 평문(소재지 `LCTN_ADDR` 는 base64 암호문) ⑤ `NICE_MSGM_NO` 길이 명세 14 vs 샘플 10 드리프트.
+- 남은 관찰: CASE2 는 표제부 샘플이 비어 주소 빈값(샘플 특성). 필요 시 `LND_LCTN_ADDR` 폴백 검토.
+
+## 11. 다음 단계
+
+1. ~~ADR-011~~ ✅ · ~~골격 구현~~ ✅ · ~~외부 테스트 픽스처+검증~~ ✅ (2026-06-05).
+2. (인레포) FE 신선도 배지(`inquiry_date`) + 존재가드 폼 배선(`/api/registry-db/{unq}/exists`).
 3. 수집기 레포에 6테이블 ETL(step2 연장).
-4. 사내 실 DDL/master/복호 확정 후 상수·접속 교체 + 실데이터 검증.
+4. 사내 실 DDL/master/복호 확정 후 상수·접속 교체 → `registry_source=db` 운영 검증.

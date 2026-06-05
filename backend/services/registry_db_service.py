@@ -124,6 +124,7 @@ def _current_inquiry_date(db: Session, rles_unq_no: str) -> Optional[str]:
     row = (
         db.query(NiceRlesBasic.iqry_dt)
         .filter(NiceRlesBasic.rles_unq_no == rles_unq_no)
+        .order_by(NiceRlesBasic.iqry_dt.desc())
         .first()
     )
     return row[0] if row else None
@@ -131,13 +132,16 @@ def _current_inquiry_date(db: Session, rles_unq_no: str) -> Optional[str]:
 
 def _build_deterministic(db: Session, rles_unq_no: str) -> Optional[dict]:
     """6테이블 SELECT 만으로 채우는 결정적층. 기본행 없으면 None."""
+    # 최신 스냅샷 = IQRY_DT 최대인 기본행. 그 NICE_MSGM_NO 로 자식 테이블을 조인(다중 조회 격리).
     basic = (
         db.query(NiceRlesBasic)
         .filter(NiceRlesBasic.rles_unq_no == rles_unq_no)
+        .order_by(NiceRlesBasic.iqry_dt.desc())
         .first()
     )
     if not basic:
         return None
+    msgm = basic.nice_msgm_no
 
     out = _empty_result()
     out["inquiry_date"] = basic.iqry_dt or ""
@@ -150,16 +154,22 @@ def _build_deterministic(db: Session, rles_unq_no: str) -> Optional[dict]:
     # 표제부 평문 주소(C12 도로명 우선, 없으면 C11 지번) — 암호화된 소재/거주지 회피
     headers = (
         db.query(NiceRlesHeader)
-        .filter(NiceRlesHeader.rles_unq_no == rles_unq_no)
+        .filter(
+            NiceRlesHeader.rles_unq_no == rles_unq_no,
+            NiceRlesHeader.nice_msgm_no == msgm,
+        )
         .all()
     )
-    hdr = {h.hdr_dtl_cd: (h.hdr_ctnt or "") for h in headers}
+    hdr = {h.hdr_dtl_cd: (h.hdr_ctnt or "") for h in headers if h.hdr_ctnt}
     property_addr = hdr.get(_HDR_ROAD) or hdr.get(_HDR_JIBEON) or ""
 
     # 소유자 (요약명세 BRF_I)
     for b in (
         db.query(NiceRlesBrief)
-        .filter(NiceRlesBrief.rles_unq_no == rles_unq_no)
+        .filter(
+            NiceRlesBrief.rles_unq_no == rles_unq_no,
+            NiceRlesBrief.nice_msgm_no == msgm,
+        )
         .all()
     ):
         out["ownership_entries"].append({
@@ -175,7 +185,10 @@ def _build_deterministic(db: Session, rles_unq_no: str) -> Optional[dict]:
     tenant = 0
     for c in (
         db.query(NiceRlesCollateral)
-        .filter(NiceRlesCollateral.rles_unq_no == rles_unq_no)
+        .filter(
+            NiceRlesCollateral.rles_unq_no == rles_unq_no,
+            NiceRlesCollateral.nice_msgm_no == msgm,
+        )
         .all()
     ):
         purpose = (c.rgty_prps_ctnt or "").strip()
@@ -199,6 +212,7 @@ def _build_deterministic(db: Session, rles_unq_no: str) -> Optional[dict]:
         db.query(NiceRlesDetail)
         .filter(
             NiceRlesDetail.rles_unq_no == rles_unq_no,
+            NiceRlesDetail.nice_msgm_no == msgm,
             NiceRlesDetail.ccrg_dvcd == "1",
         )
         .all()
@@ -206,7 +220,7 @@ def _build_deterministic(db: Session, rles_unq_no: str) -> Optional[dict]:
         purpose = (d.rgty_prps_ctnt or "").strip()
         if any(k in purpose for k in _GAP_OTHER_KEYWORDS):
             out["ownership_other_entries"].append({
-                "rank_number": _to_int(d.rgty_rank_no),
+                "rank_number": _to_int(d.ccrg_rank_no),
                 "purpose": purpose,
                 "receipt_info": _fmt_receipt(d.rgty_actc_dt, d.rgty_actc_no),
                 "details": "",
