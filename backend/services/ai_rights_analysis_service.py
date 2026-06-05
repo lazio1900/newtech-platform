@@ -379,46 +379,24 @@ def _run_critique(client, db, text: str, pass1_json: str) -> list[str]:
         return []
 
 
-def generate_or_get_cached(
-    db: Session,
-    application_id: Optional[str],
-    registry_ic_id: Optional[int],
-) -> dict:
-    """등기부 LLM 분석 결과 dict 반환.
+def extract_rights_dict(db: Session, text: str, label: str = "") -> dict:
+    """등기부 markdown → 권리 dict (LLM + 결정적 게이트 + critique 재생성). 소스/캐시 무관 순수 추출.
 
-    캐시 우선, 없으면 PDF 추출 + LLM 호출. 실패 시 빈 dict.
+    ic_id 경로(generate_or_get_cached)와 PDF 직접 변환 로더(scripts/load_pdf_as_nice)가 공유.
     """
-    if not registry_ic_id:
-        return _empty_result()
-
-    app = None
-    if application_id:
-        app = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
-        if app and app.ai_rights_text:
-            try:
-                return json.loads(app.ai_rights_text)
-            except json.JSONDecodeError:
-                pass  # 캐시 깨짐 → 재생성
-
-    # 등기부 API 가 PDF 발급 시 캐싱한 markdown 우선 사용 (MinerU 재호출 회피).
-    text = _fetch_cached_markdown(registry_ic_id) or ""
-    if not text:
-        pdf_bytes = _fetch_pdf_blob(registry_ic_id)
-        if not pdf_bytes:
-            return _empty_result()
-        text = _extract_markdown(pdf_bytes)
-    if not text.strip():
-        logger.warning(f"[ai_rights] {registry_ic_id}: empty PDF text")
+    if not text or not text.strip():
+        logger.warning(f"[ai_rights] {label}: empty text")
         return _empty_result()
 
     # gpt-4o 128k context. 복잡 등기부에서 후순위/말소사항 누락 방지차 cap 완화.
     MAX_CHARS = 80000
     if len(text) > MAX_CHARS:
-        logger.warning(f"[ai_rights] {registry_ic_id}: text {len(text)} > {MAX_CHARS}, truncating")
+        logger.warning(f"[ai_rights] {label}: text {len(text)} > {MAX_CHARS}, truncating")
         text = text[:MAX_CHARS]
 
+    src = f", {label}" if label else ""
     user_prompt = (
-        f"등기부등본 (MinerU markdown, ic_id={registry_ic_id}):\n"
+        f"등기부등본 (MinerU markdown{src}):\n"
         "- 섹션은 '##' 헤더 (표제부 / 갑구 / 을구).\n"
         "- 표는 HTML <table> 또는 마크다운 파이프 표로 보존됨. rowspan/colspan 있을 수 있음.\n"
         "- 일부 글자가 OCR 노이즈로 깨졌을 수 있음. 동일 정보가 다른 행에 정상 표기된 경우 그쪽을 신뢰.\n\n"
@@ -447,11 +425,9 @@ def generate_or_get_cached(
         issues = _deterministic_issues(text, parsed)
         issues += _run_critique(client, db, text, pass1_json)
         if issues:
-            logger.info(
-                f"[ai_rights] {registry_ic_id}: critique issues={len(issues)}, regenerating"
-            )
+            logger.info(f"[ai_rights] {label}: critique issues={len(issues)}, regenerating")
             regen_prompt = (
-                f"등기부등본 (markdown 정제, ic_id={registry_ic_id}):\n\n{text}\n\n"
+                f"등기부등본 (markdown 정제{src}):\n\n{text}\n\n"
                 f"1차 분석 결과(JSON):\n\n{pass1_json}\n\n"
                 f"검증 단계에서 다음 문제가 지적됐습니다:\n"
                 + "\n".join(f"- {i}" for i in issues)
@@ -484,16 +460,52 @@ def generate_or_get_cached(
         out["seizure_summary"] = _flatten(parsed.get("seizure_summary"))
         out["priority_summary"] = _flatten(parsed.get("priority_summary"))
         out["comprehensive_opinion"] = _flatten(parsed.get("comprehensive_opinion"))
-
-        if app:
-            app.ai_rights_text = json.dumps(out, ensure_ascii=False)
-            app.ai_rights_generated_at = datetime.utcnow()
-            db.commit()
-            logger.info(
-                f"[ai_rights] cached for application {application_id} "
-                f"(in={result.get('prompt_tokens')}, out={result.get('completion_tokens')})"
-            )
         return out
     except Exception as e:
-        logger.warning(f"[ai_rights] LLM call failed: {e}")
+        logger.warning(f"[ai_rights] {label} LLM call failed: {e}")
         return _empty_result()
+
+
+def generate_or_get_cached(
+    db: Session,
+    application_id: Optional[str],
+    registry_ic_id: Optional[int],
+) -> dict:
+    """등기부 LLM 분석 결과 dict 반환.
+
+    캐시 우선, 없으면 PDF 추출 + LLM 호출. 실패 시 빈 dict.
+    """
+    if not registry_ic_id:
+        return _empty_result()
+
+    app = None
+    if application_id:
+        app = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
+        if app and app.ai_rights_text:
+            try:
+                return json.loads(app.ai_rights_text)
+            except json.JSONDecodeError:
+                pass  # 캐시 깨짐 → 재생성
+
+    # 등기부 API 가 PDF 발급 시 캐싱한 markdown 우선 사용 (MinerU 재호출 회피).
+    text = _fetch_cached_markdown(registry_ic_id) or ""
+    if not text:
+        pdf_bytes = _fetch_pdf_blob(registry_ic_id)
+        if not pdf_bytes:
+            return _empty_result()
+        text = _extract_markdown(pdf_bytes)
+
+    out = extract_rights_dict(db, text, label=f"ic_id={registry_ic_id}")
+
+    # 실패/빈 추출은 캐시하지 않음 — 다음 조회 시 재시도 가능하게.
+    has_content = (
+        out.get("ownership_entries") or out.get("ownership_other_entries")
+        or out.get("mortgage_entries") or out.get("max_bond_amount")
+        or out.get("tenant_deposit") or out.get("eul_summary")
+    )
+    if app and has_content:
+        app.ai_rights_text = json.dumps(out, ensure_ascii=False)
+        app.ai_rights_generated_at = datetime.utcnow()
+        db.commit()
+        logger.info(f"[ai_rights] cached for application {application_id}")
+    return out
