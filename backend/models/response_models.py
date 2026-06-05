@@ -84,6 +84,7 @@ class PropertyRightsInfo(BaseModel):
     mortgage_entries: list  # (근)저당권 및 전세권 등 (을구)
     max_bond_amount: int  # 선순위 채권최고액 (원)
     tenant_deposit: int   # 선순위 임차보증금 (원)
+    inquiry_date: Optional[str] = None  # 등기 조회시점 YYYYMMDD (DB경로 신선도 배지, step5)
 
 
 class PricePoint(BaseModel):

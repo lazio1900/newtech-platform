@@ -67,6 +67,7 @@ def _prefetch_ai_analysis(application_id: str):
         app_pyeong = app.pyeong
         app_loan_amount = app.loan_amount
         app_registry_ic_id = app.registry_ic_id
+        app_rles_unq_no = app.rles_unq_no
 
         tasks = {}
         if scores is not None:
@@ -109,10 +110,10 @@ def _prefetch_ai_analysis(application_id: str):
                 )
             tasks["nearby"] = _nearby
 
-        if app_registry_ic_id:
-            from services.ai_rights_analysis_service import generate_or_get_cached as gen_rights
-            def _rights(local_db, _ic=app_registry_ic_id):
-                return gen_rights(local_db, application_id, _ic)
+        if app_registry_ic_id or app_rles_unq_no:
+            from services.rights_source import get_rights_data
+            def _rights(local_db, _ic=app_registry_ic_id, _unq=app_rles_unq_no):
+                return get_rights_data(local_db, application_id, _ic, _unq)
             tasks["rights"] = _rights
 
         if tasks:

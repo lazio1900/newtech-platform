@@ -25,6 +25,7 @@ from routers import (
     monitoring,
     regions,
     registry,
+    registry_db,
     suggestions,
     users,
 )
@@ -59,6 +60,7 @@ app.include_router(analyze.router,       prefix="/api/analyze",       tags=["ana
 app.include_router(complexes.router,     prefix="/api/complexes",     tags=["complexes"])
 app.include_router(regions.router,       prefix="/api/regions",       tags=["regions"])
 app.include_router(registry.router,      prefix="/api/registry",      tags=["registry"])
+app.include_router(registry_db.router,   prefix="/api/registry-db",   tags=["registry-db"])
 app.include_router(users.router,         prefix="/api/me",            tags=["users"])
 app.include_router(admin_users.router,   prefix="/api/admin/users",   tags=["admin-users"])
 app.include_router(admin_llm.router,     prefix="/api/admin/llm/connections", tags=["admin-llm"])

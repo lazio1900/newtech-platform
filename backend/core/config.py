@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     registry_internal_token: Optional[str] = None
     registry_request_timeout: int = 120
 
+    # ----- 권리분석 source (step5) -----
+    # pdf=현행 외부 8100→MinerU→LLM (안전 기본) / db=폐쇄망 NICE 6테이블 결정적 빌드 /
+    # auto=rles_unq_no 있으면 db, 없으면 pdf (전환기). 6테이블 적재 전까지 pdf 유지.
+    registry_source: Literal["pdf", "auto", "db"] = "pdf"
+
     # ----- MinerU API (PDF→markdown 사이드카, 8200 포트) -----
     mineru_api_url: str = "http://localhost:8200"
     mineru_request_timeout: int = 300

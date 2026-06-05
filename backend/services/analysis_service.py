@@ -174,6 +174,7 @@ def perform_full_analysis(
     complex_name: Optional[str] = None,
     application_id: Optional[str] = None,
     registry_ic_id: Optional[int] = None,
+    rles_unq_no: Optional[str] = None,
     interest_rate: Optional[float] = None,
     ceo_name: Optional[str] = None,
     business_number: Optional[str] = None,
@@ -224,31 +225,42 @@ def perform_full_analysis(
     )
     property_rights_info = generate_property_rights_info(property_address)
 
-    # 1-0. 등기부등본 LLM 권리 분석 — application_id 의 registry_ic_id 또는 명시적 registry_ic_id 사용
+    # 1-0. 등기부 권리 분석 — source 디스패처(settings.registry_source)로 DB경로/PDF경로 선택.
+    #       키는 명시 전달값 우선, 없으면 신청건(rles_unq_no / registry_ic_id)에서 보강.
+    from core.config import settings as _settings
     rights_llm: dict = {}
-    registry_ic_id_for_app: Optional[int] = None
+    rights_from_db = False
     if db is not None:
         try:
             ic_id: Optional[int] = registry_ic_id  # 직접조회는 frontend 가 명시 전달
-            if application_id and not ic_id:
+            unq: Optional[str] = rles_unq_no
+            # DB경로(db/auto)에서만 신청건의 rles_unq_no 를 보강 — pdf 경로는 ic_id 만 필요.
+            need_unq = _settings.registry_source != "pdf"
+            if application_id and (not ic_id or (need_unq and not unq)):
                 from models.loan import LoanApplication
                 la = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
-                if la and la.registry_ic_id:
-                    ic_id = la.registry_ic_id
-            if ic_id:
-                registry_ic_id_for_app = ic_id
-                from services.ai_rights_analysis_service import generate_or_get_cached as gen_rights
-                rights_llm = gen_rights(db, application_id, ic_id)
+                if la:
+                    ic_id = ic_id or la.registry_ic_id
+                    unq = unq or la.rles_unq_no
+            rights_from_db = _settings.registry_source == "db" or (
+                _settings.registry_source == "auto" and bool(unq)
+            )
+            if ic_id or unq:
+                from services.rights_source import get_rights_data
+                rights_llm = get_rights_data(db, application_id, ic_id, unq)
         except Exception as e:
             logger.warning(f"AI 권리 분석 실패: {e}")
-    # rights_llm 결과로 property_rights_info 의 표 4종 + 합계 채움 (있으면)
-    # 등기부 추출이 한 건이라도 성공하면 합계도 항상 덮어쓰기 (0 도 의미있는 실값)
-    if rights_llm.get("ownership_entries") or rights_llm.get("mortgage_entries"):
+    # rights_llm 결과로 property_rights_info 의 표 4종 + 합계 채움.
+    # DB경로(결정적)는 결과가 비어도 더미를 덮어쓴다(설계 §7 더미 차단 — 0/[] 도 실값).
+    # PDF경로는 추출이 한 건이라도 성공했을 때만 덮어써 실패 시 기존 더미를 유지.
+    if rights_from_db or rights_llm.get("ownership_entries") or rights_llm.get("mortgage_entries"):
         property_rights_info.ownership_entries = rights_llm.get("ownership_entries") or []
         property_rights_info.ownership_other_entries = rights_llm.get("ownership_other_entries") or []
         property_rights_info.mortgage_entries = rights_llm.get("mortgage_entries") or []
         property_rights_info.max_bond_amount = int(rights_llm.get("max_bond_amount") or 0)
         property_rights_info.tenant_deposit = int(rights_llm.get("tenant_deposit") or 0)
+    if rights_llm.get("inquiry_date"):
+        property_rights_info.inquiry_date = rights_llm["inquiry_date"]
 
     # 시세 데이터: 실 데이터 우선, 없으면 더미
     credit_data = (

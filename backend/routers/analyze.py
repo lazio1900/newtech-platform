@@ -34,6 +34,7 @@ def analyze(
         complex_name=request.complex_name,
         application_id=request.application_id,
         registry_ic_id=request.registry_ic_id,
+        rles_unq_no=request.rles_unq_no,
         interest_rate=request.interest_rate,
         ceo_name=request.ceo_name,
         business_number=request.business_number,

@@ -167,3 +167,17 @@
 **보존 정책**:
 - 분석 감사 로그: 5년 (금융권 표준)
 - 인증 로그: 1년
+
+---
+
+## ADR-011. NICE 부동산 등기부 6테이블 — 수집기 소유 read-only
+
+**맥락**: 폐쇄망 권리분석을 위해 사내 NICE 등기부 6테이블(`nice_rles_*`)을 앱이 읽어야 한다(step4/step5). 이는 ADR-002의 수집기 소유 5테이블 밖의 새 데이터 도메인이다.
+
+**결정**:
+- 6테이블은 **수집기(newtech_data) 소유, 앱은 read-only**. ADR-002 원칙을 그대로 확장.
+- 적재: **정보계 Oracle → 수집기 ETL → 앱 PG(`kb_estate`) 미러**(step1-2 KB 파이프와 동일 레일). 앱은 외부 DB에 직접 붙지 않는다(데이터접근 A, step5 §5).
+- 앱은 이 테이블에 **INSERT/UPDATE/Alembic 마이그레이션을 만들지 않는다.** ORM은 read-only 미러(`models/registry_nice.py`)로 두고 `models/__init__`·alembic autogenerate 대상에서 제외(수집기 소유라 앱 alembic이 건드리면 안 됨).
+- 앱의 등기부 권리분석 source는 `settings.registry_source`로 전환(`pdf`/`auto`/`db`). 폐쇄망 컷오버 완료 시 PDF경로(외부 8100/MinerU/외부 LLM)와 `registry_ic_id` 제거.
+
+**미결(사내 확인 후 확정)**: 물리 테이블/컬럼명·공통코드 master·암호화 복호 모듈(주소·실명번호) — 확정 전 `registry_source="pdf"` 유지(현행 무변화).

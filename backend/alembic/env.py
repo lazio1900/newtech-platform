@@ -39,6 +39,14 @@ COLLECTOR_TABLES = {
     "crawl_runs",
     "crawl_tasks",
     "raw_payloads",
+    # NICE 등기부 6테이블 — 수집기 소유 read-only 미러 (ADR-011). 앱 마이그레이션 생성 금지.
+    # registry_nice 가 어디서 import 되든(순서 무관) autogenerate 에서 항상 제외.
+    "nice_rles_basic",
+    "nice_rles_brief",
+    "nice_rles_collateral",
+    "nice_rles_detail",
+    "nice_rles_party",
+    "nice_rles_header",
 }
 
 
