@@ -51,6 +51,9 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
   const [dong, setDong] = useState<string>('');
   const [ho, setHo] = useState<string>('');
 
+  // 부동산고유번호 (폐쇄망 등기부 조인키, 수기 입력)
+  const [rlesUnqNo, setRlesUnqNo] = useState<string>('');
+
   // 등기부등본 발급
   const [registryLoading, setRegistryLoading] = useState<boolean>(false);
   const [registryResult, setRegistryResult] = useState<{
@@ -425,6 +428,11 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
       alert('신청금액을 올바르게 입력해주세요.');
       return;
     }
+    const rlesUnqNoDigits = rlesUnqNo.replace(/\D/g, '');
+    if (rlesUnqNoDigits && rlesUnqNoDigits.length !== 14) {
+      alert('부동산고유번호는 숫자 14자리입니다. (예: 1149-1996-233513)');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -442,6 +450,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
         dong: dong.trim() || null,
         ho: ho.trim() || null,
         registry_ic_id: registryResult?.ic_id ?? null,
+        rles_unq_no: rlesUnqNoDigits || null,
       });
       if (data.status === 'success') {
         alert('대출 신청이 완료되었습니다.');
@@ -450,6 +459,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
         setSigunguList([]); setDongList([]);
         resetComplexAndDownstream();
         setAmount(''); setDuration('12');
+        setRlesUnqNo('');
         setRegistryResult(null);
         setActiveTab('history');
       }
@@ -735,6 +745,14 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
                              onChange={(e) => setHo(e.target.value)}
                              placeholder="예: 502" disabled={submitting} />
                     </div>
+                  </div>
+
+                  {/* 부동산고유번호 (폐쇄망 등기부 조인키) */}
+                  <div className="apply-field">
+                    <label>부동산고유번호</label>
+                    <input type="text" value={rlesUnqNo}
+                           onChange={(e) => setRlesUnqNo(e.target.value)}
+                           placeholder="예: 1149-1996-233513 (숫자 14자리)" disabled={submitting} />
                   </div>
 
 

@@ -28,6 +28,7 @@ export interface SubmitApplicationPayload {
   dong?: string | null;
   ho?: string | null;
   registry_ic_id?: number | null;
+  rles_unq_no?: string | null;
 }
 
 export const updateApplication = async (

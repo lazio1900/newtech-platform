@@ -102,6 +102,8 @@ class LoanApplication(Base):
     ai_nearby_generated_at = Column(DateTime, nullable=True)
     # 등기부등본 발급 결과 ic_id (registry_request 테이블 참조값, FK 미설정 — 별도 마이크로서비스)
     registry_ic_id = Column(Integer, nullable=True, index=True)
+    # 부동산고유번호 (RLES_UNQ_NO, 14자리) — 폐쇄망 NICE 등기부 6테이블 조인키. 심사자 수기 입력 (registry-spec §7-5)
+    rles_unq_no = Column(String(14), nullable=True, index=True)
     # AI 권리 분석 캐시 (LLM 응답 — 좌측 요약 + 우측 줄글 통합 JSON)
     ai_rights_text = Column(Text, nullable=True, comment="LLM 권리 분석 (요약 + 줄글) JSON")
     ai_rights_generated_at = Column(DateTime, nullable=True)
@@ -147,6 +149,7 @@ class LoanApplication(Base):
             "dong": self.dong,
             "ho": self.ho,
             "registry_ic_id": self.registry_ic_id,
+            "rles_unq_no": self.rles_unq_no,
             # FE 호환: status는 한글 라벨로 노출. status_value는 enum 값.
             "status": status_label,
             "status_value": status_value,

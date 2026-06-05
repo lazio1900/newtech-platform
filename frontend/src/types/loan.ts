@@ -150,6 +150,7 @@ export interface LoanApplication {
   dong?: string | null;
   ho?: string | null;
   registry_ic_id?: number | null;
+  rles_unq_no?: string | null;
   memo?: string | null;
   created_at: string;
   decided_at?: string | null;

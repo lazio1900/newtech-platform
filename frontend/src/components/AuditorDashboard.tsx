@@ -116,6 +116,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
         dong: payload.dong || null,
         ho: payload.ho || null,
         registry_ic_id: payload.options.registry_ic_id ?? null,
+        rles_unq_no: payload.options.rles_unq_no ?? null,
       });
       alert(`신청건이 등록되었습니다 (ID: ${res.application?.id ?? '-'}). 대부업체 신청건 탭으로 이동합니다.`);
       await fetchApplications();
@@ -152,6 +153,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
         dong: payload.dong || null,
         ho: payload.ho || null,
         registry_ic_id: payload.options.registry_ic_id ?? null,
+        rles_unq_no: payload.options.rles_unq_no ?? null,
       });
       setEditingApp(null);
       await fetchApplications();
@@ -1041,6 +1043,7 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                   dong: editingApp.dong ?? null,
                   ho: editingApp.ho ?? null,
                   registryIcId: editingApp.registry_ic_id ?? null,
+                  rlesUnqNo: editingApp.rles_unq_no ?? null,
                   loanAmount: editingApp.loan_amount,
                   loanDuration: editingApp.loan_duration,
                 }}

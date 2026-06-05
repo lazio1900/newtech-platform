@@ -1,9 +1,10 @@
 """대출 신청 라우터: /api/applications/*"""
 import logging
+import re
 from datetime import date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from core.auth import get_current_user, require_role
@@ -145,6 +146,21 @@ def _prefetch_ai_analysis(application_id: str):
 router = APIRouter()
 
 
+def _normalize_rles_unq_no(v: str | None) -> str | None:
+    """부동산고유번호(RLES_UNQ_NO) 정규화 — 하이픈/공백 제거 후 14자리 숫자만 허용.
+
+    입력 예 '1149-1996-233513' → 저장 '11491996233513'. 빈 값은 None.
+    """
+    if v is None:
+        return None
+    digits = re.sub(r"\D", "", v)
+    if not digits:
+        return None
+    if len(digits) != 14:
+        raise ValueError("부동산고유번호는 숫자 14자리여야 합니다.")
+    return digits
+
+
 class ApplicationCreateRequest(BaseModel):
     """신청자는 토큰의 사용자로 결정 (body의 applicant_id는 무시)."""
     company_name: str = Field(..., min_length=1, max_length=200)
@@ -166,6 +182,13 @@ class ApplicationCreateRequest(BaseModel):
     ho: str | None = Field(None, max_length=40)
     # 신청 전 발급한 등기부등본 ic_id (선택)
     registry_ic_id: int | None = None
+    # 부동산고유번호 (14자리, 하이픈 허용) — 폐쇄망 등기부 조인키, 심사자 수기 입력
+    rles_unq_no: str | None = Field(None, max_length=20)
+
+    @field_validator("rles_unq_no")
+    @classmethod
+    def _v_rles_unq_no(cls, v: str | None) -> str | None:
+        return _normalize_rles_unq_no(v)
 
 
 class ApplicationStatusUpdateRequest(BaseModel):
@@ -191,6 +214,12 @@ class ApplicationUpdateRequest(BaseModel):
     dong: str | None = Field(None, max_length=40)
     ho: str | None = Field(None, max_length=40)
     registry_ic_id: int | None = None
+    rles_unq_no: str | None = Field(None, max_length=20)
+
+    @field_validator("rles_unq_no")
+    @classmethod
+    def _v_rles_unq_no(cls, v: str | None) -> str | None:
+        return _normalize_rles_unq_no(v)
 
 
 @router.post("")
@@ -219,6 +248,7 @@ def submit(
         dong=request.dong,
         ho=request.ho,
         registry_ic_id=request.registry_ic_id,
+        rles_unq_no=request.rles_unq_no,
     )
 
     # 백그라운드로 LLM 입지 분석 미리 생성 — auditor 진입 시 캐시 히트
@@ -278,6 +308,7 @@ def update_application(
         dong=request.dong,
         ho=request.ho,
         registry_ic_id=request.registry_ic_id,
+        rles_unq_no=request.rles_unq_no,
     )
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="신청건을 찾을 수 없습니다.")

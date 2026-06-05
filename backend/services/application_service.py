@@ -30,6 +30,7 @@ def submit(
     dong: Optional[str] = None,
     ho: Optional[str] = None,
     registry_ic_id: Optional[int] = None,
+    rles_unq_no: Optional[str] = None,
 ) -> LoanApplication:
     app = LoanApplication(
         id=str(uuid.uuid4())[:8],
@@ -51,6 +52,7 @@ def submit(
         dong=dong,
         ho=ho,
         registry_ic_id=registry_ic_id,
+        rles_unq_no=rles_unq_no,
     )
     db.add(app)
     db.commit()
@@ -99,6 +101,7 @@ def update(
     dong: Optional[str] = None,
     ho: Optional[str] = None,
     registry_ic_id: Optional[int] = None,
+    rles_unq_no: Optional[str] = None,
 ) -> Optional[LoanApplication]:
     """신청건 본문 수정. status / decided_at / applicant_user_id 는 건드리지 않는다."""
     app = get_by_id(db, app_id)
@@ -120,6 +123,7 @@ def update(
     app.dong = dong
     app.ho = ho
     app.registry_ic_id = registry_ic_id
+    app.rles_unq_no = rles_unq_no
     db.commit()
     db.refresh(app)
     return app

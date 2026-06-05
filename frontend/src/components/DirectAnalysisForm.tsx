@@ -33,6 +33,7 @@ export interface DirectAnalyzePayload {
     complex_name?: string | null;
     pyeong?: number | null;
     registry_ic_id?: number | null;
+    rles_unq_no?: string | null;
   };
 }
 
@@ -44,6 +45,7 @@ export interface DirectAnalyzeInitial {
   dong?: string | null;
   ho?: string | null;
   registryIcId?: number | null;
+  rlesUnqNo?: string | null;
   loanAmount?: number | null;
   interestRate?: number | null;
   loanDuration?: number | null;
@@ -83,6 +85,9 @@ export default function DirectAnalysisForm({
   // 동·호
   const [dong, setDong] = useState<string>('');
   const [ho, setHo] = useState<string>('');
+
+  // 부동산고유번호 (폐쇄망 등기부 조인키, 수기 입력)
+  const [rlesUnqNo, setRlesUnqNo] = useState<string>('');
 
   // 등기부등본 발급
   const [registryLoading, setRegistryLoading] = useState<boolean>(false);
@@ -133,6 +138,7 @@ export default function DirectAnalysisForm({
     if (!initial || prefilledRef.current) return;
     if (initial.dong) setDong(initial.dong);
     if (initial.ho) setHo(initial.ho);
+    if (initial.rlesUnqNo) setRlesUnqNo(initial.rlesUnqNo);
     if (initial.loanAmount != null) setAmount(String(initial.loanAmount));
     if (initial.interestRate != null) setInterestRate(String(initial.interestRate));
     if (initial.loanDuration != null) setDuration(String(initial.loanDuration));
@@ -484,6 +490,11 @@ export default function DirectAnalysisForm({
     if (!selectedArea) { alert('평형을 선택해주세요.'); return; }
     if (!amount) { alert('대출 신청금액을 입력해주세요.'); return; }
 
+    const rlesUnqNoDigits = rlesUnqNo.replace(/\D/g, '');
+    if (rlesUnqNoDigits && rlesUnqNoDigits.length !== 14) {
+      alert('부동산고유번호는 숫자 14자리입니다. (예: 1149-1996-233513)'); return;
+    }
+
     const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
     const dongHo = formatDongHo(dong, ho);
     const fullAddress = [roadAddr, selectedComplex.name, dongHo].filter(Boolean).join(' ').trim();
@@ -506,6 +517,7 @@ export default function DirectAnalysisForm({
         complex_name: selectedComplex.name,
         pyeong: derivedPyeong,
         registry_ic_id: registryResult?.ic_id ?? null,
+        rles_unq_no: rlesUnqNoDigits || null,
       },
     });
   };
@@ -692,6 +704,14 @@ export default function DirectAnalysisForm({
                 <input type="text" value={ho} onChange={(e) => setHo(e.target.value)}
                        placeholder="예: 502" disabled={submitting} />
               </div>
+            </div>
+
+            {/* 부동산고유번호 (폐쇄망 등기부 조인키) */}
+            <div className="daf-field">
+              <label>부동산고유번호</label>
+              <input type="text" value={rlesUnqNo}
+                     onChange={(e) => setRlesUnqNo(e.target.value)}
+                     placeholder="예: 1149-1996-233513 (숫자 14자리)" disabled={submitting} />
             </div>
 
             {/* 등기부등본 */}
