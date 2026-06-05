@@ -14,7 +14,7 @@
 
 **왜 ETL이 결국 필요한가:** 앱은 수집기 소유 테이블을 read-only 로만 읽는다(ADR-002). 그래서 Oracle 원천을 앱이 직접 읽지 않고, **수집기(newtech_data)가 Oracle→`kb_estate`(공유 PostgreSQL)로 업서트**하면 앱은 기존처럼 `kb_estate`를 read-only 로 읽는다. = 읽기쓰루가 아니라 수집기 쪽 ETL 동기화.
 
-**진행 상태:** step1(매핑) ✅ · step2(ETL 사양) ✅ · **step3(좌표/지오코딩 전략) ❌ 미완** → 여기가 다음 작업.
+**진행 상태:** step1(매핑) ✅ · step2(ETL 사양) ✅ · step3(좌표/지오코딩 전략) ✅ · **step4(등기부등본 NICE DB 통합 사양) ✅** → 다음 = **수집기 ETL 구현 착수** + **registry_db_service 구현**(step4 §7-5 부동산고유번호 매핑 결정 후).
 
 ---
 
@@ -24,7 +24,8 @@
 |---|---|---|---|
 | step1 | field_mappings 초안 + 로더 갭 표 | `docs/internal-migration-field-mappings.md` | `065f3b6` |
 | step2 | Oracle→kb_estate ETL 적재기 사양(수집기 신설) | `docs/internal-migration-etl-spec.md` | `3358efa` |
-| step3 | 좌표/지오코딩 전략 | **아직 없음** (`docs/internal-migration-geocoding-strategy.md` 미생성) | — |
+| step3 | 좌표/지오코딩 전략 (폐쇄망 — 공공 좌표DB 반입+키 조인) | `docs/internal-migration-geocoding-strategy.md` | (커밋 대기) |
+| step4 | 등기부등본 NICE 6테이블 → `PropertyRightsData` 통합 사양 | `docs/internal-migration-registry-spec.md` | (커밋 대기) |
 | 분석 메모리 | 6테이블→5엔티티 판정 요약 | `~/.claude/.../memory/project_internal_kb_migration.md` | (메모리) |
 
 - **브랜치**: `feat/internal-migration`. 신규 이관 코드는 전부 이 브랜치에서.
@@ -71,21 +72,19 @@
 
 ---
 
-## 4. 다음 작업 = step3 (좌표/지오코딩 전략)
+## 4. step3 완료 — 좌표/지오코딩 전략 (2026-06-04 확정)
 
-**목표**: Oracle 에 lat/lng 가 없어 막힌 인근동향/지도/입지를, 주소 기반 지오코딩으로 활성화할지·어떻게 할지 결정.
-
-**핵심 결정 드라이버 (사용자만 답할 수 있음)**: 금융사 **사내 폐쇄망에서 외부 지오코딩 API(카카오/네이버/VWorld 등) 호출이 가능한가?** 여기서 갈린다 —
-- 호출 가능 → 외부 지오코더 배치(`geocode_complexes_task`) 신설.
-- 불가(폐쇄망) → 오프라인 지오코딩(좌표 사전 DB·법정동 중심좌표 근사) 또는 사내에 좌표 원천 확보 협의.
-
-**설계 골격(step2 §7 에 분리해 둠)**: 적재 시 lat/lng=`None`(nullable이라 무결성 지장 없음) → 별도 `geocode_complexes_task`(`WHERE lat IS NULL AND address IS NOT NULL`, `road_address` 우선) 배치. 기존 수집기 좌표 출처는 KB detail API라 Oracle엔 적용 불가.
-
-**⚠️ 이력 주의**: 직전 세션에서 step3 를 웹리서치 워크플로(`wai3o60mz`)로 돌렸다가 **실패**했다 — 웹리서치 서브에이전트들이 `StructuredOutput` 을 안 부르고 종료. 재시도 시 (a) 스키마를 단순화하거나 (b) 웹검색과 구조화출력 단계를 분리하거나 (c) "부분/저신뢰여도 무조건 StructuredOutput 호출" 지시를 명확히. 또는 폐쇄망 여부를 **먼저 사용자에게 묻고** 답에 맞는 가지만 조사하면 리서치 범위가 절반으로 준다(추천).
-
-**산출 형식**: `docs/internal-migration-geocoding-strategy.md` 작성 → 사용자 스타일로 커밋 → 운영 결정사항(폐쇄망 여부 등)은 대화로 제시.
+사용자 확정: **운영망(폐쇄망)에서 외부 지오코딩 API 호출 불가.** 외부망 사전변환·반입 우회도 약관상 봉쇄(Kakao "저장 불허·라이브 콜 only", VWorld "DB 저장 불가" — 1차 출처 검증). 채택 전략 = **행안부 내비게이션용DB 반입 + 건물관리번호(`ROAD_NM_BLDG_MGMT_NO`, Oracle 샘플에 존재) 키 조인**, EPSG:5179→WGS84 변환, 수집기에 좌표사전 테이블+조인 태스크. 추가 확정(2026-06-04): 미매칭 fallback **미적용**(lat NULL 유지), **지도 표시 필수 아님**(타일서버 검토 불요). 미결 1건 = 행안부 데이터 신청(행정). 상세·근거는 `docs/internal-migration-geocoding-strategy.md`.
 
 ---
+
+## 4-bis. step4 완료 — 등기부등본 NICE DB 통합 (2026-06-05 확정)
+
+사용자가 사내 **NICE 부동산 등기부 6테이블**(`CUWT_NIC_RLES_*`, 주제명역 `02.심사승인`) 명세+3케이스 샘플+원본 PDF 제공. 분석 결과 **권리분석/LTV/등기부 발급이라는 별개 데이터 도메인이 해결됨**:
+- 현행 권리분석은 `외부 등기부API(8100) → MinerU(8200) → gpt-4o PDF파싱`(폐쇄망에서 깨짐). NICE 6테이블이 플랫폼 기존 목표 스키마 `PropertyRightsData`에 거의 1:1 매핑 → **결정적 구조화 조회로 대체**.
+- **`max_bond_amount`(LTV 분자) = SUM(저당명세 근저당 채권최고액)** = LLM 추정 → 정확 합산. 금액 원단위(×10000 불필요). 호단위. 조인키=부동산고유번호(14자리).
+- 주의 3대: **신선도**(`IQRY_DT` 스냅샷 — PDF 압류 사례로 실증), **암호화**(주소·실명번호 PII), **공통코드 master 필요**.
+- 최대 미결: **부동산고유번호 ↔ 신청(complex/dong/ho) 매핑**(현 `registry_ic_id` Integer 발급ID는 폐쇄망 무의미). 상세·매핑표·선결확인은 `docs/internal-migration-registry-spec.md`.
 
 ## 5. step3 이후 (구현 단계 — 아직 착수 전)
 
@@ -126,6 +125,8 @@ step2 §9 의 open questions. 추측 금지, probe/DESCRIBE 로 실제 확인할
 |---|---|
 | 매핑 정의·로더 갭 | `docs/internal-migration-field-mappings.md` (step1) |
 | ETL 적재기 사양 | `docs/internal-migration-etl-spec.md` (step2) |
+| 좌표/지오코딩 전략 | `docs/internal-migration-geocoding-strategy.md` (step3) |
+| 등기부 NICE DB 통합 | `docs/internal-migration-registry-spec.md` (step4) |
 | 아키텍처 결정 | `docs/architecture-decisions.md` (ADR-001~010, 특히 002/003) |
 | 더미 vs 실데이터 화면별 | `docs/dummy-vs-real.md` |
 | 연동·포트·DB 소유권 | `INTEGRATION.md` |
