@@ -112,4 +112,4 @@ NICE_MSGM_NO   전문관리번호   = 1회 등기조회 트랜잭션 (샘플 실
 
 ## 8. 다음 단계
 
-step4 사양 확정 → **`registry_db_service` 구현 + `PropertyRightsData` 결정적 빌드 + 더미 차단 + 신선도 UI**. 적재는 step2 ETL(수집기)과 함께. **선결 §7-5/§7-7 해소됨**(고유번호 핸드오프 + 심사자 수동 조회) → 신청→권리분석 연결 코드 작성 가능. 신청에 14자리 고유번호 컬럼 추가(현 `registry_ic_id` 대체) + 입력 가드 + `registry_db_service`가 그 키로 6테이블 결정적 빌드.
+step4 사양 확정 → **`registry_db_service` 구현 + `PropertyRightsData` 결정적 빌드 + 더미 차단 + 신선도 UI**. 적재는 step2 ETL(수집기)과 함께. **선결 §7-5/§7-7 해소됨**(고유번호 핸드오프 + 심사자 수동 조회) → 신청→권리분석 연결 코드 작성 가능. 신청 `rles_unq_no`(14자리) 컬럼 추가 완료(`f12c6de`, 현 `registry_ic_id`와 병행 — 컷오버 시 제거). `registry_db_service` 상세 설계는 **step5 `docs/internal-migration-registry-db-service-design.md`**(결정적 빌드 + 사내 LLM 요약, 데이터접근 A 확정).

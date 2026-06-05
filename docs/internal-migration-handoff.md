@@ -2,7 +2,7 @@
 
 > 이 문서는 **오케스트레이션용 인덱스**다. 세부 사양은 중복 기재하지 않고 step1/step2 문서로 링크한다.
 > 결정·근거의 단일 출처: 본 문서 §관련 문서 표. 충돌 시 그 원본 문서가 우선.
-> 최종 갱신: 2026-06-04 (브랜치 `feat/internal-migration`, HEAD `3358efa`).
+> 최종 갱신: 2026-06-05 (브랜치 `feat/internal-migration`, HEAD `f12c6de`).
 
 ---
 
@@ -14,7 +14,7 @@
 
 **왜 ETL이 결국 필요한가:** 앱은 수집기 소유 테이블을 read-only 로만 읽는다(ADR-002). 그래서 Oracle 원천을 앱이 직접 읽지 않고, **수집기(newtech_data)가 Oracle→`kb_estate`(공유 PostgreSQL)로 업서트**하면 앱은 기존처럼 `kb_estate`를 read-only 로 읽는다. = 읽기쓰루가 아니라 수집기 쪽 ETL 동기화.
 
-**진행 상태:** step1(매핑) ✅ · step2(ETL 사양) ✅ · step3(좌표/지오코딩 전략) ✅ · **step4(등기부등본 NICE DB 통합 사양) ✅** → 다음 = **수집기 ETL 구현 착수** + **registry_db_service 구현**(step4 §7-5 부동산고유번호 매핑 결정 후).
+**진행 상태:** step1(매핑) ✅ · step2(ETL 사양) ✅ · step3(좌표/지오코딩 전략) ✅ · step4(등기부 NICE DB 통합 사양) ✅ · **step5(registry_db_service 설계) ✅** · **1번 구현(신청 `rles_unq_no` 컬럼) ✅ 반영완료** → 다음 = **registry_db_service 골격 구현**(step5 §8, 피처플래그 뒤) + 수집기 6테이블 ETL.
 
 ---
 
@@ -24,8 +24,10 @@
 |---|---|---|---|
 | step1 | field_mappings 초안 + 로더 갭 표 | `docs/internal-migration-field-mappings.md` | `065f3b6` |
 | step2 | Oracle→kb_estate ETL 적재기 사양(수집기 신설) | `docs/internal-migration-etl-spec.md` | `3358efa` |
-| step3 | 좌표/지오코딩 전략 (폐쇄망 — 공공 좌표DB 반입+키 조인) | `docs/internal-migration-geocoding-strategy.md` | (커밋 대기) |
-| step4 | 등기부등본 NICE 6테이블 → `PropertyRightsData` 통합 사양 | `docs/internal-migration-registry-spec.md` | (커밋 대기) |
+| step3 | 좌표/지오코딩 전략 (폐쇄망 — 공공 좌표DB 반입+키 조인) | `docs/internal-migration-geocoding-strategy.md` | `381b58b` |
+| step4 | 등기부등본 NICE 6테이블 → `PropertyRightsData` 통합 사양 | `docs/internal-migration-registry-spec.md` | `2ec415b`(+`637b111` §7-5/§7-7 결정) |
+| step5 | `registry_db_service` 설계 (결정적 빌드 + 사내 LLM 요약, 데이터접근 A) | `docs/internal-migration-registry-db-service-design.md` | (커밋 대기) |
+| 1번 구현 | 신청에 `rles_unq_no`(14자리) 컬럼 추가 + 형식검증 + 두 폼 입력 | `backend/models/loan.py` 외 9파일 + `0017` | `f12c6de` |
 | 분석 메모리 | 6테이블→5엔티티 판정 요약 | `~/.claude/.../memory/project_internal_kb_migration.md` | (메모리) |
 
 - **브랜치**: `feat/internal-migration`. 신규 이관 코드는 전부 이 브랜치에서.
@@ -127,6 +129,7 @@ step2 §9 의 open questions. 추측 금지, probe/DESCRIBE 로 실제 확인할
 | ETL 적재기 사양 | `docs/internal-migration-etl-spec.md` (step2) |
 | 좌표/지오코딩 전략 | `docs/internal-migration-geocoding-strategy.md` (step3) |
 | 등기부 NICE DB 통합 | `docs/internal-migration-registry-spec.md` (step4) |
+| registry_db_service 설계 | `docs/internal-migration-registry-db-service-design.md` (step5) |
 | 아키텍처 결정 | `docs/architecture-decisions.md` (ADR-001~010, 특히 002/003) |
 | 더미 vs 실데이터 화면별 | `docs/dummy-vs-real.md` |
 | 연동·포트·DB 소유권 | `INTEGRATION.md` |
