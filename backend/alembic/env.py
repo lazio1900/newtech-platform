@@ -47,6 +47,13 @@ COLLECTOR_TABLES = {
     "nice_rles_detail",
     "nice_rles_party",
     "nice_rles_header",
+    # KB 내부형식 6테이블 — 수집기 소유(prod=Oracle, dev=시뮬레이션 미러). 앱 마이그레이션 금지.
+    "cctr_kb_apt_m",
+    "cctr_kb_apt_pntp_i",
+    "cctr_kb_apt_qtn_l",
+    "cctr_apt_txcs_hist",
+    "cctr_kb_apt_stdng_c",
+    "cctr_kb_apt_txcs_mpng_b",
 }
 
 

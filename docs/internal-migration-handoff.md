@@ -28,6 +28,7 @@
 | step4 | 등기부등본 NICE 6테이블 → `PropertyRightsData` 통합 사양 | `docs/internal-migration-registry-spec.md` | `2ec415b`(+`637b111` §7-5/§7-7 결정) |
 | step5 | `registry_db_service` 설계 (결정적 빌드 + 사내 LLM 요약, 데이터접근 A) | `docs/internal-migration-registry-db-service-design.md` | (커밋 대기) |
 | 1번 구현 | 신청에 `rles_unq_no`(14자리) 컬럼 추가 + 형식검증 + 두 폼 입력 | `backend/models/loan.py` 외 9파일 + `0017` | `f12c6de` |
+| KB dev/prod 모드 | KB 내부형식 `CCTR_*` 6테이블 ORM + 크롤→CCTR_* 정형화 + CCTR_*→app 변환(verify/apply) + `DATA_MODE` 스위치 + 전환 런북 | `backend/models/internal_kb.py`·`scripts/{build_cctr_from_crawl,cctr_to_app}.py`·`docs/internal-migration-mode-switch-runbook.md` 외 | (이번 커밋) |
 | 분석 메모리 | 6테이블→5엔티티 판정 요약 | `~/.claude/.../memory/project_internal_kb_migration.md` | (메모리) |
 
 - **브랜치**: `feat/internal-migration`. 신규 이관 코드는 전부 이 브랜치에서.

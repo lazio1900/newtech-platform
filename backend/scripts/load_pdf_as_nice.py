@@ -18,6 +18,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core.config import settings  # noqa: E402
 from core.database import SessionLocal, engine  # noqa: E402
 from models import registry_nice as rn  # noqa: E402
 from services.ai_rights_analysis_service import (  # noqa: E402
@@ -107,6 +108,10 @@ def explode(d: dict, unq: str, today: str) -> list:
 
 
 def main() -> None:
+    if settings.data_mode != "dev":
+        print(f"거부: data_mode={settings.data_mode} (dev 전용 로더). "
+              "운영은 수집기 Oracle 미러가 nice_rles_* 를 소유한다.", file=sys.stderr)
+        sys.exit(2)
     if len(sys.argv) < 2:
         print("usage: load_pdf_as_nice.py <pdf> [부동산고유번호]", file=sys.stderr)
         sys.exit(1)

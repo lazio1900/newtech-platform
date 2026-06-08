@@ -3,13 +3,12 @@
 사내망 운영 전환에 필요한 사전 조건을 한 화면으로 확인. 각 항목은 자동 검증이
 가능한 것만 포함하고, 실패 시 어드민 페이지로 deep-link 안내.
 """
-import os
-
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.auth import require_role
+from core.config import settings
 from core.database import get_db
 from models import DbConnection, DataSourceMapping, User, UserRole
 from services import db_connection_service, entity_registry, data_source_mapping_service
@@ -122,13 +121,27 @@ def _check_app_migration(db: Session) -> dict:
 
 
 def _check_data_source_mode() -> dict:
-    """현재 DATA_SOURCE 환경변수 — crawl(외부 수집기) / internal(사내망 어댑터)."""
-    mode = os.getenv("DATA_SOURCE", "crawl")
+    """데이터 소스 모드 — dev(외부 크롤/PDF 정형화) / prod(폐쇄망 Oracle+수집기).
+
+    운영(ENVIRONMENT=production)인데 dev/pdf 로 남아 있으면 .env 전환 누락 → ok=False.
+    dev 환경에선 정보 표시(ok=True). 전환 절차는 mode-switch 런북.
+    """
+    mode = settings.data_mode
+    src = settings.registry_source
+    detail = f"현재 모드: {mode} · 등기부 읽기(registry_source): {src}"
+    if settings.is_production and not (mode == "prod" and src == "db"):
+        return {
+            "key": "data_source_mode",
+            "label": "데이터 소스 모드",
+            "ok": False,
+            "detail": detail + " — 운영인데 dev/pdf 잔존(.env 누락: DATA_MODE=prod, REGISTRY_SOURCE=db)",
+            "link": None,
+        }
     return {
         "key": "data_source_mode",
         "label": "데이터 소스 모드",
-        "ok": True,  # 정보 표시만 — 운영 전환 시점에 사용자가 internal 로 바꿈
-        "detail": f"현재 모드: {mode}",
+        "ok": True,
+        "detail": detail,
         "link": None,
     }
 

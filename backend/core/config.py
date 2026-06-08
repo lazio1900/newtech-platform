@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     # ----- Environment -----
     environment: Literal["development", "staging", "production"] = "development"
 
+    # ----- 데이터 소스 모드 (사내 이관) -----
+    # dev  = 외부에서 크롤/PDF 데이터를 내부형식(CCTR_*/nice_rles_*)으로 정형화해 테스트.
+    #        개발 전용 적재 스크립트(build_cctr_from_crawl·cctr_to_app --apply·load_nice_*) 허용.
+    # prod = 폐쇄망. 내부형식 원천은 Oracle, 적재 주체는 수집기. 개발 적재 스크립트는 거부.
+    # 앱 런타임 읽기경로는 모드와 무관(KB=app-schema, 등기부=registry_source). 전환 절차는
+    # docs/internal-migration-mode-switch-runbook.md.
+    data_mode: Literal["dev", "prod"] = "dev"
+
     # ----- Database / Redis -----
     database_url: str = "postgresql://kb_user:kb_password@localhost:5433/kb_estate"
     redis_url: str = "redis://localhost:6379/0"

@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import BigInteger, Integer  # noqa: E402
 
+from core.config import settings  # noqa: E402
 from core.database import SessionLocal, engine  # noqa: E402
 from models import registry_nice as rn  # noqa: E402
 
@@ -102,6 +103,10 @@ def _convert(col, val: str):
 
 
 def main() -> None:
+    if settings.data_mode != "dev":
+        print(f"거부: data_mode={settings.data_mode} (dev 전용 로더). "
+              "운영은 수집기 Oracle 미러가 nice_rles_* 를 소유한다.", file=sys.stderr)
+        sys.exit(2)
     if not os.path.isdir(SAMPLE_DIR):
         print(f"샘플 디렉토리 없음: {SAMPLE_DIR}", file=sys.stderr)
         sys.exit(1)
