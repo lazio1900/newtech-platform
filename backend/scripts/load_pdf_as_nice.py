@@ -27,6 +27,7 @@ from services.ai_rights_analysis_service import (  # noqa: E402
 )
 
 _UNQ_IN_NAME = re.compile(r"(\d{4}-\d{4}-\d{6})")
+_UNQ_LABELED = re.compile(r"고유번호[\s:]*([0-9]{4}[-\s]?[0-9]{4}[-\s]?[0-9]{6})")
 _AMOUNT = re.compile(r"([\d,]+)\s*원")
 _TABLES = [
     rn.NiceRlesBasic, rn.NiceRlesBrief, rn.NiceRlesCollateral,
@@ -36,6 +37,12 @@ _TABLES = [
 
 def _digits(s: str) -> str:
     return "".join(c for c in (s or "") if c.isdigit())
+
+
+def _unq_from_text(text: str) -> str:
+    """등기부 본문에서 부동산고유번호 추출 — '고유번호 NNNN-NNNN-NNNNNN' 우선, 없으면 첫 패턴."""
+    m = _UNQ_LABELED.search(text or "") or _UNQ_IN_NAME.search(text or "")
+    return _digits(m.group(1)) if m else ""
 
 
 def _amount(text: str) -> int:
@@ -117,12 +124,9 @@ def main() -> None:
         sys.exit(1)
     pdf_path = sys.argv[1]
     unq = _digits(sys.argv[2]) if len(sys.argv) > 2 else ""
-    if not unq:
+    if len(unq) != 14:
         mm = _UNQ_IN_NAME.search(os.path.basename(pdf_path))
         unq = _digits(mm.group(1)) if mm else ""
-    if len(unq) != 14:
-        print(f"부동산고유번호 14자리 필요 (얻은 값: '{unq}')", file=sys.stderr)
-        sys.exit(1)
 
     with open(pdf_path, "rb") as f:
         pdf_bytes = f.read()
@@ -131,7 +135,12 @@ def main() -> None:
     if not text.strip():
         print("MinerU markdown 비어있음 — 중단", file=sys.stderr)
         sys.exit(1)
-    print(f"  markdown {len(text)}자 → LLM 추출")
+    if len(unq) != 14:  # arg/파일명에 없으면 등기부 본문에서 추출
+        unq = _unq_from_text(text)
+    if len(unq) != 14:
+        print("부동산고유번호 14자리를 arg/파일명/본문 어디서도 못 찾음 — 인자로 넘기세요.", file=sys.stderr)
+        sys.exit(1)
+    print(f"  고유번호 {unq} · markdown {len(text)}자 → LLM 추출")
 
     db = SessionLocal()
     try:
