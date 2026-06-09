@@ -17,6 +17,7 @@ export interface RegistryPreview {
   rles_unq_no: string;
   exists: boolean;
   property_address?: string;
+  exclusive_m2?: number | null;
   inquiry_date?: string;
   mortgage_count?: number;
   seizure_count?: number;

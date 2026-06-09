@@ -66,6 +66,7 @@ def _empty_result() -> dict:
         "priority_summary": "",
         "comprehensive_opinion": "",
         "property_address": "",
+        "exclusive_m2": None,
         "inquiry_date": "",
         "seizure_count": 0,
         "prov_seizure_count": 0,
@@ -87,6 +88,15 @@ def _to_int(v) -> int:
         return int(str(v).strip())
     except (ValueError, TypeError, AttributeError):
         return 0
+
+
+def _parse_m2(v: Optional[str]):
+    """'59.68㎡' → 59.68. 표제부 전유면적(E82) 파싱. 없으면 None."""
+    s = "".join(c for c in (v or "") if c.isdigit() or c == ".")
+    try:
+        return float(s) if s else None
+    except ValueError:
+        return None
 
 
 def _digits(v: Optional[str]) -> str:
@@ -213,6 +223,7 @@ def build_preview(db: Session, rles_unq_no: str) -> dict:
         "rles_unq_no": rles_unq_no,
         "exists": True,
         "property_address": det.get("property_address", ""),
+        "exclusive_m2": det.get("exclusive_m2"),
         "inquiry_date": det["inquiry_date"],
         "mortgage_count": det["mortgage_count"],
         "seizure_count": det["seizure_count"],
@@ -264,6 +275,7 @@ def _build_deterministic(db: Session, rles_unq_no: str) -> Optional[dict]:
     hdr = {h.hdr_dtl_cd: (h.hdr_ctnt or "") for h in headers if h.hdr_ctnt}
     property_addr = hdr.get(_HDR_ROAD) or hdr.get(_HDR_JIBEON) or ""
     out["property_address"] = property_addr
+    out["exclusive_m2"] = _parse_m2(hdr.get("E82"))
 
     # 소유자 (요약명세 BRF_I)
     for b in (

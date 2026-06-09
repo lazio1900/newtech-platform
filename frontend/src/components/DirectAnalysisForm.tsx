@@ -502,6 +502,15 @@ export default function DirectAnalysisForm({
     }
   };
 
+  // 등기부 전유면적(㎡)에 가장 가까운 단지 평형 자동 선택
+  const autoSelectAreaByM2 = (m2: number | null | undefined) => {
+    if (m2 == null || areas.length === 0) return;
+    const closest = areas.reduce((best, a) =>
+      Math.abs(a.exclusive_m2 - m2) < Math.abs(best.exclusive_m2 - m2) ? a : best);
+    setSelectedArea(closest);
+    setRegistryExclusiveM2(m2);
+  };
+
   const previewUnq = async (raw: string) => {
     const digits = raw.replace(/\D/g, '');
     if (digits.length !== 14) { alert('부동산고유번호는 숫자 14자리입니다. (예: 1149-1996-233513)'); return; }
@@ -509,7 +518,9 @@ export default function DirectAnalysisForm({
     setDbPreview(null);
     setUnqSearchError(null);
     try {
-      setDbPreview(await registryDbApi.preview(digits));
+      const p = await registryDbApi.preview(digits);
+      setDbPreview(p);
+      if (p.exists && p.exclusive_m2 != null) autoSelectAreaByM2(p.exclusive_m2);
     } catch (e) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string };
       setUnqSearchError(err?.response?.data?.detail || err?.message || '등기부 조회 실패');
@@ -767,40 +778,6 @@ export default function DirectAnalysisForm({
                        placeholder="예: 502" disabled={submitting} />
               </div>
             </div>
-
-            {/* 평형 — 등기부 표제부 전용면적 기반 자동 선택, 다르면 수정 가능 */}
-            <div className="daf-field">
-              <label>평형 <span className="daf-required">*</span></label>
-              {areas.length === 0 ? (
-                <div className="daf-hint">
-                  <span className="daf-status warning">⚠ 이 단지의 평형 정보가 수집되지 않았습니다.</span>
-                </div>
-              ) : (
-                <>
-                  <select value={selectedArea?.id ?? ''}
-                          onChange={(e) => setSelectedArea(areas.find((a) => a.id === parseInt(e.target.value, 10)) ?? null)}
-                          disabled={submitting} className="daf-select">
-                    <option value="">{registryResult?.status === 'completed' ? '직접 선택' : '직접 선택 또는 등기부 발급 후 자동 선택'}</option>
-                    {areas.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        전용 {a.exclusive_m2.toFixed(2)}㎡
-                        {a.pyeong ? ` (${a.pyeong.toFixed(2)}평)` : ''}
-                      </option>
-                    ))}
-                  </select>
-                  {registryExclusiveM2 != null && (
-                    <div className="daf-hint">
-                      <span className="daf-status success">
-                        등기부 전용 {registryExclusiveM2.toFixed(2)}㎡ 기반 자동 선택 — 다르면 selector 에서 변경
-                      </span>
-                    </div>
-                  )}
-                  {selectedArea && derivedPyeongFloat != null && (
-                    <div className="daf-hint">≈ 약 <strong>{derivedPyeongFloat.toFixed(2)}평</strong></div>
-                  )}
-                </>
-              )}
-            </div>
           </>
         )}
       </div>
@@ -942,6 +919,42 @@ export default function DirectAnalysisForm({
                 </div>
               )}
             </div>
+          )}
+        </div>
+
+        {/* 평형 — 등기부(전유면적)에서 결정되는 정보. 조회/발급 시 자동 선택, 다르면 수정 */}
+        <div className="daf-field">
+          <label>평형 <span className="daf-required">*</span></label>
+          {areas.length === 0 ? (
+            <div className="daf-hint">
+              <span className="daf-status warning">
+                {selectedComplex ? '⚠ 이 단지의 평형 정보가 수집되지 않았습니다.' : '① 에서 단지를 먼저 선택하세요'}
+              </span>
+            </div>
+          ) : (
+            <>
+              <select value={selectedArea?.id ?? ''}
+                      onChange={(e) => setSelectedArea(areas.find((a) => a.id === parseInt(e.target.value, 10)) ?? null)}
+                      disabled={submitting} className="daf-select">
+                <option value="">직접 선택 또는 등기부 조회·발급 시 자동 선택</option>
+                {areas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    전용 {a.exclusive_m2.toFixed(2)}㎡
+                    {a.pyeong ? ` (${a.pyeong.toFixed(2)}평)` : ''}
+                  </option>
+                ))}
+              </select>
+              {registryExclusiveM2 != null && (
+                <div className="daf-hint">
+                  <span className="daf-status success">
+                    등기부 전용 {registryExclusiveM2.toFixed(2)}㎡ 기반 자동 선택 — 다르면 selector 에서 변경
+                  </span>
+                </div>
+              )}
+              {selectedArea && derivedPyeongFloat != null && (
+                <div className="daf-hint">≈ 약 <strong>{derivedPyeongFloat.toFixed(2)}평</strong></div>
+              )}
+            </>
           )}
         </div>
       </div>
