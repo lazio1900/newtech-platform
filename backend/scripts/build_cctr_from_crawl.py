@@ -51,29 +51,48 @@ def _norm_name(name):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=300, help="대상 단지 수 (0=전체)")
+    ap.add_argument("--complex-ids", type=str, default="",
+                    help="특정 app-schema 단지 id(쉼표) — append 모드(drop 안 함, 해당 단지만 갱신)")
     args = ap.parse_args()
 
     if settings.data_mode != "dev":
         print(f"거부: data_mode={settings.data_mode} (dev 전용 스크립트). 운영은 수집기 ETL.", file=sys.stderr)
         sys.exit(2)
 
-    # dev 편의: 내부형식 테이블 재생성(per-table — 공유 ENUM 보호).
-    for t in _TABLES:
-        t.__table__.drop(engine, checkfirst=True)
+    ids = [int(x) for x in args.complex_ids.split(",") if x.strip()]
+    append = bool(ids)
+
+    # dev 편의: 내부형식 테이블 재생성(per-table — 공유 ENUM 보호). append 모드는 drop 안 함.
+    if not append:
+        for t in _TABLES:
+            t.__table__.drop(engine, checkfirst=True)
     for t in _TABLES:
         t.__table__.create(engine, checkfirst=True)
 
     db = SessionLocal()
     counts = {t.__tablename__: 0 for t in _TABLES}
     try:
-        cq = db.query(Complex).filter(Complex.kb_complex_id.isnot(None)).order_by(Complex.id)
-        if args.limit:
+        cq = db.query(Complex).filter(Complex.kb_complex_id.isnot(None))
+        if ids:
+            cq = cq.filter(Complex.id.in_(ids))
+        cq = cq.order_by(Complex.id)
+        if args.limit and not ids:
             cq = cq.limit(args.limit)
         complexes = cq.all()
         cplx_ids = [c.id for c in complexes]
         kba_of = {c.id: c.kb_complex_id for c in complexes}
 
-        stdng_seen, mpng_seen = set(), set()
+        if append:
+            # 대상 단지의 기존 CCTR 행 제거(PK 중복 방지). stdng_c 는 동코드 공유라 존재 시 skip.
+            kbas = list(kba_of.values())
+            for t in (ik.CctrKbAptM, ik.CctrKbAptPntpI, ik.CctrKbAptQtnL,
+                      ik.CctrAptTxcsHist, ik.CctrKbAptTxcsMpngB):
+                db.query(t).filter(t.kb_qtn_rles_gd_cd.in_(kbas)).delete(synchronize_session=False)
+
+        # append: 이미 적재된 법정동코드는 재삽입 금지(PK 중복)
+        stdng_seen = ({r[0] for r in db.query(ik.CctrKbAptStdngC.kb_qtn_stdng_cd).all()}
+                      if append else set())
+        mpng_seen = set()
         for c in complexes:
             db.add(ik.CctrKbAptM(
                 kb_qtn_rles_gd_cd=c.kb_complex_id, apt_nm=c.name,

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from models.response_models import (
     AnalysisData, AnalysisResponse, AIAnalysis, RightsAnalysisDetail,
-    BorrowerInfo, GuarantorInfo, PropertyBasicInfo, YearlyFinancial,
+    BorrowerInfo, GuarantorInfo, PropertyBasicInfo, PropertyRightsInfo, YearlyFinancial,
 )
 from services.dummy_data import (
     generate_property_basic_info,
@@ -200,17 +200,24 @@ def perform_full_analysis(
             logger.warning(f"DB 연결 불가, 더미 데이터 사용: {e}")
             db = None
 
+    from core.config import settings as _cfg
+    _internal = _cfg.internal_only  # 크롤·더미 차단, ETL된 내부형식만(CCTR_*/nice_rles_*)
+
     if db is not None:
         try:
-            real_data = get_real_market_data(
-                db,
-                property_address,
-                target_pyeong=target_pyeong,
-                complex_id=complex_id,
-                area_id=area_id,
-            )
+            if _internal:
+                from services.internal_market_service import get_internal_market_data
+                real_data = get_internal_market_data(db, complex_id=complex_id, area_id=area_id)
+            else:
+                real_data = get_real_market_data(
+                    db,
+                    property_address,
+                    target_pyeong=target_pyeong,
+                    complex_id=complex_id,
+                    area_id=area_id,
+                )
         except Exception as e:
-            logger.warning(f"실 데이터 조회 실패, 더미 폴백: {e}")
+            logger.warning(f"시장데이터 조회 실패{'(internal_only)' if _internal else ', 더미 폴백'}: {e}")
             real_data = None
 
     # 1. 차주(대부업체) + 연대보증인(대표자) 정보 — lenders 마스터 한 번 조회로 둘 다 채움
@@ -223,9 +230,14 @@ def perform_full_analysis(
         credit_score_nice=credit_score_nice,
         credit_score_kcb=credit_score_kcb,
     )
-    property_rights_info = generate_property_rights_info(property_address)
+    property_rights_info = (
+        PropertyRightsInfo(ownership_entries=[], ownership_other_entries=[],
+                           mortgage_entries=[], max_bond_amount=0, tenant_deposit=0)
+        if _internal else generate_property_rights_info(property_address)
+    )
 
     # 1-0. 등기부 권리 분석 — source 디스패처(settings.registry_source)로 DB경로/PDF경로 선택.
+    #       INTERNAL_ONLY 면 db 경로 강제(registry_source 무시, PDF 폴백 없음).
     #       키는 명시 전달값 우선, 없으면 신청건(rles_unq_no / registry_ic_id)에서 보강.
     from core.config import settings as _settings
     rights_llm: dict = {}
@@ -234,18 +246,23 @@ def perform_full_analysis(
         try:
             ic_id: Optional[int] = registry_ic_id  # 직접조회는 frontend 가 명시 전달
             unq: Optional[str] = rles_unq_no
-            # DB경로(db/auto)에서만 신청건의 rles_unq_no 를 보강 — pdf 경로는 ic_id 만 필요.
-            need_unq = _settings.registry_source != "pdf"
+            # DB경로(db/auto/internal)에서 신청건의 rles_unq_no 를 보강 — pdf 경로는 ic_id 만 필요.
+            need_unq = _internal or _settings.registry_source != "pdf"
             if application_id and (not ic_id or (need_unq and not unq)):
                 from models.loan import LoanApplication
                 la = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
                 if la:
                     ic_id = ic_id or la.registry_ic_id
                     unq = unq or la.rles_unq_no
-            rights_from_db = _settings.registry_source == "db" or (
+            rights_from_db = _internal or _settings.registry_source == "db" or (
                 _settings.registry_source == "auto" and bool(unq)
             )
-            if ic_id or unq:
+            if _internal:
+                # 내부전용: nice_rles_* 결정적 빌드 직접(PDF/외부 경로 우회). unq 없으면 빈 권리.
+                if unq:
+                    from services.registry_db_service import build_rights_data
+                    rights_llm = build_rights_data(db, application_id, unq)
+            elif ic_id or unq:
                 from services.rights_source import get_rights_data
                 rights_llm = get_rights_data(db, application_id, ic_id, unq)
         except Exception as e:
@@ -262,22 +279,23 @@ def perform_full_analysis(
     if rights_llm.get("inquiry_date"):
         property_rights_info.inquiry_date = rights_llm["inquiry_date"]
 
-    # 시세 데이터: 실 데이터 우선, 없으면 더미
+    # 시세 데이터: 실 데이터 우선. 내부전용은 CCTR_* 없으면 None(확인 불가, 더미 금지).
     credit_data = (
         real_data["credit_data"]
         if real_data and real_data.get("credit_data")
-        else generate_credit_data(property_address)
+        else (None if _internal else generate_credit_data(property_address))
     )
 
     # 1-1. 입지 점수: 실 facility 데이터(학군/지하철/병원/공원) 우선, 없으면 더미
     location_scores = None
-    if real_data and real_data.get("complex") and db is not None:
+    if real_data and real_data.get("complex") and db is not None and not _internal:
         try:
             from services.location_score_service import compute_location_scores
             location_scores = compute_location_scores(db, real_data["complex"])
         except Exception as e:
             logger.warning(f"입지점수 산출 실패, 더미 폴백: {e}")
-    if location_scores is None:
+    if location_scores is None and not _internal:
+        # 내부전용은 facility(좌표 필요) 없어 입지 확인 불가 → None 유지(더미 금지)
         location_scores = generate_location_scores(property_address)
 
     # 담보 물건 기초 정보: 실 DB 우선, 없으면 더미.
@@ -289,6 +307,10 @@ def perform_full_analysis(
             property_address,
             location_scores=location_scores,
         )
+        if _internal:
+            property_basic_info.corridor_type = None  # CCTR_* 에 복도타입 없음 → 확인 불가
+    elif _internal:
+        property_basic_info = PropertyBasicInfo(address=property_address, complex_name=complex_name)
     else:
         property_basic_info = generate_property_basic_info(
             property_address,
@@ -299,23 +321,24 @@ def perform_full_analysis(
     # 1-2. 인근 유사 물건지 동향: 실 수집 데이터만 사용. 없으면 None (frontend 에서 자동 숨김).
     nearby_trends = real_data["nearby_trends"] if real_data and real_data.get("nearby_trends") else None
 
-    # 1-3. 평단가 추이: 실 데이터 우선
+    # 1-3. 평단가 추이: 실 데이터 우선. 내부전용은 None(더미 금지; 후속 CCTR 실거래 산출 가능)
     price_per_pyeong = (
         real_data["price_per_pyeong"]
         if real_data and real_data.get("price_per_pyeong")
-        else generate_price_per_pyeong_trend(
+        else (None if _internal else generate_price_per_pyeong_trend(
             property_address,
             credit_data.kb_price.estimated,
             property_basic_info.area or 34
-        )
+        ))
     )
 
     # 2. AI 종합 의견 생성 (하드코딩)
     # LTV 산출에 필요한 값
     total_prior = property_rights_info.max_bond_amount + property_rights_info.tenant_deposit + loan_amount
-    ltv_current = round(total_prior / credit_data.kb_price.estimated * 100, 1) if credit_data.kb_price.estimated > 0 else 0
+    kb_est = credit_data.kb_price.estimated if credit_data else 0  # 내부전용 시세 없으면 0 → LTV 확인 불가
+    ltv_current = round(total_prior / kb_est * 100, 1) if kb_est > 0 else 0
     # JB 적정시세 기준 LTV (KB×0.3 + 실거래×0.6 + 호가×0.1)
-    jb_basis = credit_data.jb_fair_price or credit_data.kb_price.low or credit_data.kb_price.estimated
+    jb_basis = (credit_data.jb_fair_price or credit_data.kb_price.low or kb_est) if credit_data else 0
     ltv_jb = round(total_prior / jb_basis * 100, 1) if jb_basis > 0 else 0
 
     # 유사물건 평균 변동률
@@ -327,7 +350,7 @@ def perform_full_analysis(
         )
 
     # 평단가 추이 방향
-    pyeong_data = price_per_pyeong.data
+    pyeong_data = price_per_pyeong.data if price_per_pyeong else []
     pyeong_direction = "보합"
     if len(pyeong_data) >= 2:
         diff = pyeong_data[-1].complex - pyeong_data[0].complex
@@ -370,7 +393,7 @@ def perform_full_analysis(
     target_name = real_data["complex"].name if (real_data and real_data.get("complex")) else (complex_name or "")
     complex_id_for_threads = real_data["complex"].id if (real_data and real_data.get("complex")) else None
 
-    if complex_id_for_threads is not None:
+    if complex_id_for_threads is not None and location_scores is not None:
         def _property(local_db, _cid=complex_id_for_threads, _scores=location_scores, _py=target_pyeong):
             from models.complex import Complex
             from services.ai_property_analysis_service import generate_or_get_cached as gp
@@ -424,7 +447,7 @@ def perform_full_analysis(
     # 3-4. AI 종합 의견 + 심사역 권고 — 모든 분석 사실 종합 LLM
     overall_opinion = comprehensive_opinion_fallback
     auditor_recommendation = ""
-    if real_data and db is not None:
+    if real_data and db is not None and credit_data:
         try:
             from services.ai_overall_analysis_service import generate_or_get_cached as gen_overall
             ov = gen_overall(
@@ -458,8 +481,9 @@ def perform_full_analysis(
         ),
 
         market_analysis=market_analysis_text or (
-            f"[종합 의견] AI 시세 분석 일시 사용 불가. KB 추정가 {credit_data.kb_price.estimated:,}원, "
-            f"신청금액 {loan_amount:,}원 기준 LTV 산정이 필요합니다."
+            (f"[종합 의견] AI 시세 분석 일시 사용 불가. KB 추정가 {credit_data.kb_price.estimated:,}원, "
+             f"신청금액 {loan_amount:,}원 기준 LTV 산정이 필요합니다.") if credit_data
+            else "[시세] 내부 데이터(CCTR_*)에 이 단지 시세가 없어 확인 불가입니다."
         ),
     )
 

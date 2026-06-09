@@ -220,7 +220,7 @@ class AnalysisData(BaseModel):
     guarantor_info: GuarantorInfo
     property_basic_info: PropertyBasicInfo
     property_rights_info: PropertyRightsInfo
-    credit_data: CreditData
+    credit_data: Optional[CreditData] = None  # INTERNAL_ONLY: CCTR_* 에 시세 없으면 None(확인 불가)
     ai_analysis: AIAnalysis
     nearby_property_trends: Optional[NearbyPropertyTrends] = None
     price_per_pyeong_trend: Optional[PricePerPyeongTrend] = None

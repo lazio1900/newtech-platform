@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # docs/internal-migration-mode-switch-runbook.md.
     data_mode: Literal["dev", "prod"] = "dev"
 
+    # internal_only: 크롤·더미 차단, ETL된 내부형식(CCTR_*/nice_rles_*)만 사용. 확인 못하는
+    # 정보는 더미 대신 None("확인 불가"). KB 시세는 CCTR_* 에서 산출, 위경도·매물·인근동향·
+    # 입지는 내부형식에 없어 확인 불가. 등기부는 db 강제. (가늠/폐쇄망 시뮬레이션)
+    internal_only: bool = False
+
     # ----- Database / Redis -----
     database_url: str = "postgresql://kb_user:kb_password@localhost:5433/kb_estate"
     redis_url: str = "redis://localhost:6379/0"
