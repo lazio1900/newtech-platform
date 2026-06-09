@@ -132,38 +132,12 @@
   font-size: 12px;
   text-decoration: underline;
 }
-.daf-link-btn-inline {
-  background: transparent;
-  border: none;
-  padding: 0;
-  color: #006FBD;
-  text-decoration: underline;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .daf-dong-ho {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
-.daf-registry-btn {
-  width: 100%;
-  padding: 10px 16px;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-}
-.daf-registry-hint {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #6B7785;
-  text-align: center;
-}
 .daf-registry-result {
   margin-top: 8px;
   padding: 10px;

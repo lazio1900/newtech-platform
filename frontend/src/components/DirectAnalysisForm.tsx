@@ -9,7 +9,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { complexesApi } from '../api/complexes';
 import { lendersApi, type Lender } from '../api/lenders';
 import { regionsApi, RegionItem, DongItem } from '../api/regions';
-import { registryApi } from '../api/registry';
 import { registryDbApi, type RegistryCandidate, type RegistryPreview } from '../api/registryDb';
 import type { Area, Complex } from '@/types/complex';
 import './DirectAnalysisForm.css';
@@ -90,16 +89,8 @@ export default function DirectAnalysisForm({
   // 부동산고유번호 (폐쇄망 등기부 조인키, 수기 입력)
   const [rlesUnqNo, setRlesUnqNo] = useState<string>('');
 
-  // 등기부등본 발급
-  const [registryLoading, setRegistryLoading] = useState<boolean>(false);
-  const [registryResult, setRegistryResult] = useState<{
-    status?: string; ic_id?: number | null; pdf_url?: string | null;
-    cached?: boolean; error?: string | null;
-  } | null>(null);
-  // 실제 매칭에 성공한 주소 (잘못된 등기부 가져왔는지 확인용)
-  const [registryMatch, setRegistryMatch] = useState<{
-    address?: string | null; dong?: string | null; ho?: string | null;
-  } | null>(null);
+  // 편집 대상 신청건에 연결된 등기부 PDF id — 제출 시 보존(폼에서 신규 발급은 하지 않음)
+  const [registryIcId, setRegistryIcId] = useState<number | null>(null);
   // 등기부 표제부에서 추출된 전용면적 (자동 평형 제안용)
   const [registryExclusiveM2, setRegistryExclusiveM2] = useState<number | null>(null);
 
@@ -122,7 +113,6 @@ export default function DirectAnalysisForm({
   const [duration, setDuration] = useState<string>('12');
 
   const debounceRef = useRef<number | null>(null);
-  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const prefilledRef = useRef<boolean>(false);
   // prefill 중에는 시도/시군구/읍면동 변경 effect 가 하위 선택값을 reset 하지 않도록 가드
   const isPrefillingRef = useRef<boolean>(false);
@@ -150,13 +140,7 @@ export default function DirectAnalysisForm({
     if (initial.loanAmount != null) setAmount(String(initial.loanAmount));
     if (initial.interestRate != null) setInterestRate(String(initial.interestRate));
     if (initial.loanDuration != null) setDuration(String(initial.loanDuration));
-    if (initial.registryIcId) {
-      setRegistryResult({
-        status: 'completed', ic_id: initial.registryIcId,
-        pdf_url: registryApi.pdfUrl(initial.registryIcId),
-        cached: true, error: null,
-      });
-    }
+    if (initial.registryIcId) setRegistryIcId(initial.registryIcId);
     if (initial.complexId) {
       isPrefillingRef.current = true;
       complexesApi.get(initial.complexId)
@@ -317,25 +301,9 @@ export default function DirectAnalysisForm({
     setSelectedArea(null);
     setDong('');
     setHo('');
-    setRegistryResult(null);
+    setRegistryIcId(null);
     setRegistryExclusiveM2(null);
     clearUnqState();
-  };
-
-  /** 등기부 발급 완료 후 표제부 면적 추출 + 가장 가까운 평형 자동 선택. */
-  const applyAreaSuggestion = async (icId: number, complexId: number) => {
-    try {
-      const suggestion = await registryApi.getAreaSuggestion(icId, complexId);
-      if (suggestion.exclusive_m2 != null) {
-        setRegistryExclusiveM2(suggestion.exclusive_m2);
-      }
-      if (suggestion.suggested_area_id != null) {
-        const next = areas.find((a) => a.id === suggestion.suggested_area_id);
-        if (next) setSelectedArea(next);
-      }
-    } catch {
-      // 추출 실패는 silent — 사용자가 직접 평형 선택 가능
-    }
   };
 
   const runComplexSearch = async (query: string) => {
@@ -381,125 +349,6 @@ export default function DirectAnalysisForm({
     if (d.trim()) parts.push(`${d.trim()}동`);
     if (h.trim()) parts.push(`${h.trim()}호`);
     return parts.join(' ');
-  };
-
-  const handleFetchRegistry = async () => {
-    if (!selectedComplex || !dong.trim() || !ho.trim()) return;
-    setRegistryLoading(true);
-    setRegistryResult(null);
-    setRegistryMatch(null);
-    setRegistryExclusiveM2(null);
-    try {
-      const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
-      const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
-      const res = await registryApi.request({
-        address: fullAddress, dong: dong.trim(), ho: ho.trim(),
-        type: '집합건물', complex_id: selectedComplex.id,
-      });
-      if (res.matched_address) {
-        setRegistryMatch({
-          address: res.matched_address,
-          dong: res.matched_dong ?? null,
-          ho: res.matched_ho ?? null,
-        });
-      }
-      if (res.status === 'completed' && res.ic_id) {
-        setRegistryResult({
-          status: res.status, ic_id: res.ic_id,
-          pdf_url: registryApi.pdfUrl(res.ic_id),
-          cached: res.cached, error: res.error_message,
-        });
-        applyAreaSuggestion(res.ic_id, selectedComplex.id);
-        return;
-      }
-      const icId = res.ic_id;
-      if (!icId) {
-        setRegistryResult({ status: res.status, error: res.error_message || '발급 ID 미발급' });
-        return;
-      }
-      setRegistryResult({ status: 'issuing', ic_id: icId });
-
-      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-      let elapsed = 0;
-      while (elapsed < 180_000) {
-        await sleep(5000);
-        elapsed += 5000;
-        try {
-          const cur = await registryApi.get(icId);
-          if (cur.status === 'completed') {
-            setRegistryResult({
-              status: 'completed', ic_id: icId,
-              pdf_url: registryApi.pdfUrl(icId),
-              cached: cur.cached, error: null,
-            });
-            applyAreaSuggestion(icId, selectedComplex.id);
-            return;
-          }
-          if (cur.status === 'failed') {
-            setRegistryResult({ status: 'failed', ic_id: icId, error: cur.error_message || '발급 실패' });
-            return;
-          }
-          setRegistryResult({ status: cur.status, ic_id: icId });
-        } catch { /* 일시 오류면 다음 폴링 */ }
-      }
-      setRegistryResult({
-        status: 'timeout', ic_id: icId,
-        error: '발급이 3분 안에 완료되지 않았습니다. 잠시 후 다시 확인해주세요.',
-      });
-    } catch (e) {
-      const err = e as { response?: { data?: { detail?: string } }; message?: string };
-      setRegistryResult({
-        error: err?.response?.data?.detail || err?.message || '등기부등본 발급 요청에 실패했습니다',
-      });
-    } finally {
-      setRegistryLoading(false);
-    }
-  };
-
-  const handleUploadRegistry = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';  // 같은 파일 재선택 가능하게 reset
-    if (!file) return;
-    if (!selectedComplex) { alert('단지를 먼저 선택해주세요.'); return; }
-
-    setRegistryLoading(true);
-    setRegistryResult(null);
-    setRegistryMatch(null);
-    setRegistryExclusiveM2(null);
-    try {
-      const roadAddr = selectedComplex.road_address || selectedComplex.address || '';
-      const fullAddress = `${roadAddr} ${selectedComplex.name}`.trim();
-      const res = await registryApi.upload({
-        file,
-        address: fullAddress,
-        dong: dong.trim() || null,
-        ho: ho.trim() || null,
-        type: '집합건물',
-      });
-      setRegistryResult({
-        status: res.status, ic_id: res.ic_id,
-        pdf_url: res.ic_id ? registryApi.pdfUrl(res.ic_id) : null,
-        cached: false, error: res.error_message,
-      });
-      setRegistryMatch({
-        address: `[직접 업로드] ${fullAddress}`,
-        dong: dong.trim() || null,
-        ho: ho.trim() || null,
-      });
-      if (res.ic_id) {
-        applyAreaSuggestion(res.ic_id, selectedComplex.id);
-      }
-    } catch (err) {
-      const ex = err as { response?: { data?: { detail?: string | { message?: string } } }; message?: string };
-      const detail = ex?.response?.data?.detail;
-      setRegistryResult({
-        error: (typeof detail === 'object' ? detail?.message : detail)
-            || ex?.message
-            || 'PDF 업로드 실패',
-      });
-    } finally {
-      setRegistryLoading(false);
-    }
   };
 
   // 등기부 전유면적(㎡)에 가장 가까운 단지 평형 자동 선택
@@ -589,7 +438,7 @@ export default function DirectAnalysisForm({
         area_id: selectedArea.id,
         complex_name: selectedComplex.name,
         pyeong: derivedPyeong,
-        registry_ic_id: registryResult?.ic_id ?? null,
+        registry_ic_id: registryIcId,
         rles_unq_no: rlesUnqNoDigits || null,
       },
     });
@@ -833,7 +682,7 @@ export default function DirectAnalysisForm({
           )}
           {unqCandidates && unqCandidates.length === 0 && (
             <div className="daf-hint">
-              <span className="daf-status warning">검색 결과 없음 — 직접 입력하거나 아래에서 등기부를 발급하세요</span>
+              <span className="daf-status warning">검색 결과 없음 — 부동산고유번호를 직접 입력해 조회하세요</span>
             </div>
           )}
 
@@ -851,78 +700,12 @@ export default function DirectAnalysisForm({
             </div>
           ) : (
             <div className="daf-registry-result err">
-              <strong>✗ 미적재</strong> — 이 고유번호의 등기부가 DB에 없습니다. 직접 발급/업로드하세요.
+              <strong>✗ 미적재</strong> — 이 고유번호의 등기부가 DB에 없습니다. (등기 조회·적재 선행 필요)
             </div>
           ))}
         </div>
 
-        {/* 외부 발급(폴백) — 단지·동·호 기반 IROS 발급 또는 PDF 업로드 */}
-        <div className="daf-field">
-          <label>외부 발급 (폴백)</label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" onClick={handleFetchRegistry}
-                    disabled={submitting || registryLoading || !selectedComplex || !dong.trim() || !ho.trim()}
-                    className="daf-registry-btn"
-                    style={{
-                      background: registryLoading ? '#7DCCE5' : '#006FBD',
-                      cursor: registryLoading ? 'wait' : 'pointer',
-                      opacity: (!selectedComplex || !dong.trim() || !ho.trim()) ? 0.5 : 1,
-                    }}>
-              {registryLoading ? '처리 중...' : '📄 등기부등본 가져오기'}
-            </button>
-            <span style={{ color: '#9CA3AF', fontSize: 12 }}>또는</span>
-            <button type="button" onClick={() => uploadInputRef.current?.click()}
-                    disabled={submitting || registryLoading || !selectedComplex}
-                    style={{
-                      padding: '8px 14px', background: '#fff', color: '#006FBD',
-                      border: '1px solid #006FBD', borderRadius: 6, fontWeight: 600,
-                      cursor: registryLoading ? 'wait' : 'pointer',
-                      opacity: !selectedComplex ? 0.5 : 1,
-                    }}>
-              ⬆ PDF 직접 업로드
-            </button>
-            <input ref={uploadInputRef} type="file" accept="application/pdf,.pdf"
-                   style={{ display: 'none' }} onChange={handleUploadRegistry} />
-          </div>
-          {!selectedComplex && (
-            <div className="daf-hint"><span className="daf-status warning">① 에서 단지·동/호를 먼저 선택하세요</span></div>
-          )}
-          {registryLoading && (
-            <div className="daf-registry-hint">처리에 시간이 소요될 수 있습니다.</div>
-          )}
-          {registryResult && (
-            <div className={`daf-registry-result ${registryResult.error ? 'err' : 'ok'}`}>
-              {registryResult.error || (
-                <>
-                  <strong>발급 {registryResult.status}</strong>
-                  {registryResult.ic_id ? ` (ID: ${registryResult.ic_id})` : ''}
-                  {registryResult.pdf_url && registryResult.ic_id && (
-                    <>
-                      {' · '}
-                      <button type="button" className="daf-link-btn-inline"
-                              onClick={() => registryApi.openPdf(registryResult.ic_id!)}>
-                        PDF 다운로드
-                      </button>
-                    </>
-                  )}
-                  {registryResult.cached && ' · 캐시 (재발급 비용 0)'}
-                </>
-              )}
-              {registryMatch?.address && (
-                <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>
-                  ↳ <strong>매칭 주소</strong>: {registryMatch.address}
-                  {registryMatch.dong ? ` ${registryMatch.dong}동` : ''}
-                  {registryMatch.ho ? ` ${registryMatch.ho}호` : ''}
-                  <span style={{ color: '#9CA3AF', marginLeft: 6 }}>
-                    — 이 주소가 의도한 물건과 다르면 다시 조회하거나 PDF 직접 업로드를 사용하세요.
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 평형 — 등기부(전유면적)에서 결정되는 정보. 조회/발급 시 자동 선택, 다르면 수정 */}
+        {/* 평형 — 등기부(전유면적)에서 결정되는 정보. 조회 시 자동 선택, 다르면 수정 */}
         <div className="daf-field">
           <label>평형 <span className="daf-required">*</span></label>
           {areas.length === 0 ? (
@@ -936,7 +719,7 @@ export default function DirectAnalysisForm({
               <select value={selectedArea?.id ?? ''}
                       onChange={(e) => setSelectedArea(areas.find((a) => a.id === parseInt(e.target.value, 10)) ?? null)}
                       disabled={submitting} className="daf-select">
-                <option value="">직접 선택 또는 등기부 조회·발급 시 자동 선택</option>
+                <option value="">직접 선택 또는 등기부 조회 시 자동 선택</option>
                 {areas.map((a) => (
                   <option key={a.id} value={a.id}>
                     전용 {a.exclusive_m2.toFixed(2)}㎡
