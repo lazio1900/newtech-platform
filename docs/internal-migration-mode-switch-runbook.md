@@ -139,9 +139,29 @@ docker compose exec backend python scripts/load_pdf_as_nice.py /tmp/r.pdf <부�
 
 ## 5. prod 모드 — 폐쇄망 운영
 
-앱 코드는 dev와 **동일**하다. 달라지는 것은 (1) `.env`(§3), (2) **내부형식 DB를 채우는 주체 = 수집기**.
+앱 코드는 dev와 **동일**하다. 달라지는 것은 (1) `.env`(§3), (2) **내부형식 DB를 채우는 주체 = Oracle ETL**.
 
-### 5.1 KB: Oracle `CCTR_*` → app-schema (수집기, step2)
+### 5.0 구현된 #1 운영 ETL (Oracle → PG 내부형식 미러) — **DSN만 교체** ✅
+`scripts/oracle_to_pg_etl.py` 가 정보계 Oracle `CCTR_*`(6) + `CUWT_NIC_RLES_*`(6) 을 PG 내부형식
+(`cctr_*`/`nice_rles_*`)으로 **전체 미러**한다. 앱은 `INTERNAL_ONLY=true` 로 그 미러를 읽음
+(시세=`internal_market_service`, 등기부=`registry_db_service`).
+
+- **운영 전환 = `.env` 의 `ORACLE_DSN`/`ORACLE_USER`/`ORACLE_PASSWORD` 3줄만 사내 정보계로 교체** → 같은 ETL 실행.
+- 물리 테이블/컬럼명이 사내와 다르면 `scripts/internal_oracle_common.py` 의 `TABLE_MAP`·컬럼만 조정(ETL 본체 불변).
+- 단위: PG 미러는 Oracle 원본 그대로(만원). 읽기 시 ×10000. 현재 전체 재적재(테이블별 delete→insert),
+  대용량 운영은 워터마크 증분(step2 §2)이 후속.
+
+**Oracle 없이 #1 검증(dev 시뮬레이터)**:
+```bash
+docker compose --profile oracle up -d oracle                    # 로컬 Oracle(gvenzl/oracle-free, 기본 stack 비포함)
+docker compose exec backend python scripts/oracle_sim_setup.py  # 12테이블 생성 + 현 PG데이터 시드(정보계 흉내, dev전용)
+docker compose exec backend python scripts/oracle_to_pg_etl.py  # Oracle→PG 미러 (= 운영과 동일 코드)
+```
+검증됨: 시뮬레이터→ETL→PG 65,957행, 앱이 Oracle 경유 데이터로 시세(24억)·등기부(6.35억) 산출.
+
+> 참고: 아래 §5.1/§5.2는 원래 step2 안(Oracle→app-schema 변환 적재, Architecture A). 실제 구현은 **§5.0(미러+INTERNAL_ONLY 직접읽기)** 로 수렴 — 운영 app-schema가 어차피 ETL-only라 두 방식 결과는 동치.
+
+### 5.1 KB: Oracle `CCTR_*` → app-schema (수집기, step2 — 대안)
 - 수집기(newtech_data)가 Oracle `CCTR_*` 6테이블을 읽어 **§4.1과 동일한 변환 매핑**으로
   app-schema(`complexes`/`areas`/`kb_prices`/`transactions`)에 멱등 적재. ADR-002상 적재 주체는 수집기.
 - 변환 규칙의 단일 출처는 `cctr_to_app.py`의 `complex_fields/area_fields/price_fields`와
