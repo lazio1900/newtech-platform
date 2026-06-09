@@ -7,10 +7,11 @@ import AdminLlmConnections from './AdminLlmConnections';
 import AdminPrompts from './AdminPrompts';
 import AdminDbConnections from './AdminDbConnections';
 import AdminDataMappings from './AdminDataMappings';
+import AdminOracleEtl from './AdminOracleEtl';
 import AdminMigrationCheck from './AdminMigrationCheck';
 import './AdminPanel.css';
 
-type SubTab = 'users' | 'llm' | 'prompts' | 'db' | 'data-mappings' | 'migration';
+type SubTab = 'users' | 'llm' | 'prompts' | 'db' | 'data-mappings' | 'oracle-etl' | 'migration';
 
 export default function AdminPanel() {
   const [sub, setSub] = useState<SubTab>('users');
@@ -27,6 +28,7 @@ export default function AdminPanel() {
         <SubTabBtn label="프롬프트" active={sub === 'prompts'} onClick={() => setSub('prompts')} />
         <SubTabBtn label="DB 연결" active={sub === 'db'} onClick={() => setSub('db')} />
         <SubTabBtn label="데이터 매핑" active={sub === 'data-mappings'} onClick={() => setSub('data-mappings')} />
+        <SubTabBtn label="Oracle ETL" active={sub === 'oracle-etl'} onClick={() => setSub('oracle-etl')} />
         <SubTabBtn label="운영 전환" active={sub === 'migration'} onClick={() => setSub('migration')} />
       </nav>
 
@@ -36,6 +38,7 @@ export default function AdminPanel() {
         {sub === 'prompts' && <AdminPrompts />}
         {sub === 'db' && <AdminDbConnections />}
         {sub === 'data-mappings' && <AdminDataMappings />}
+        {sub === 'oracle-etl' && <AdminOracleEtl />}
         {sub === 'migration' && (
           <AdminMigrationCheck onNavigate={(t) => setSub(t)} />
         )}
