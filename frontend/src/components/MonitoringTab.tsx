@@ -404,16 +404,22 @@ export default function MonitoringTab() {
                     />
                     <AIRightsAnalysis analysis={detailData.ai_analysis.rights_analysis} />
                   </div>
-                  <div className="layout-row">
-                    <CreditSources data={detailData.credit_data} />
-                    <PriceCharts data={detailData.credit_data} />
-                  </div>
-                  <div className="layout-row-full">
-                    <AIMarketAnalysis
-                      analysis={detailData.ai_analysis.market_analysis}
-                      jbDetail={detailData.credit_data.jb_detail}
-                    />
-                  </div>
+                  {detailData.credit_data ? (
+                    <>
+                      <div className="layout-row">
+                        <CreditSources data={detailData.credit_data} />
+                        <PriceCharts data={detailData.credit_data} />
+                      </div>
+                      <div className="layout-row-full">
+                        <AIMarketAnalysis
+                          analysis={detailData.ai_analysis.market_analysis}
+                          jbDetail={detailData.credit_data.jb_detail}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="card daf-unavailable">시세 확인 불가 — 내부형식(CCTR_*)에 이 단지 시세 데이터가 없습니다.</div>
+                  )}
                 </div>
               )}
             </div>

@@ -401,7 +401,8 @@ def perform_full_analysis(
             return gp(db=local_db, application_id=application_id, complex_obj=co, scores=_scores, pyeong=_py)
         parallel_tasks["property"] = _property
 
-    if real_data and real_data.get("credit_data"):
+    if real_data and real_data.get("credit_data") and not _internal:
+        # internal_only 는 AI 시세 내러티브 캐시(앱별, mode 미구분)를 안 탐 → fallback 텍스트 사용
         def _market(local_db, _credit=credit_data, _nb=nearby_trends, _amt=loan_amount, _tp=total_prior, _py=target_pyeong, _ir=interest_rate):
             from services.ai_market_analysis_service import generate_or_get_cached as gm
             return gm(db=local_db, application_id=application_id,
@@ -447,7 +448,7 @@ def perform_full_analysis(
     # 3-4. AI 종합 의견 + 심사역 권고 — 모든 분석 사실 종합 LLM
     overall_opinion = comprehensive_opinion_fallback
     auditor_recommendation = ""
-    if real_data and db is not None and credit_data:
+    if real_data and db is not None and credit_data and not _internal:
         try:
             from services.ai_overall_analysis_service import generate_or_get_cached as gen_overall
             ov = gen_overall(

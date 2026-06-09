@@ -26,6 +26,11 @@ def _prefetch_ai_analysis(application_id: str):
     auditor 가 신청건 분석 들어왔을 때 이미 캐시 히트되어 즉시 응답.
     실패해도 무방 — 호출 시점에 다시 시도됨.
     """
+    from core.config import settings
+    if settings.internal_only:
+        # internal_only: 크롤 기반 prefetch 금지(AI 캐시 오염 차단). 호출 시점 perform_full_analysis
+        # 가 CCTR_*/nice_rles_* 로 처리. (크롤 시세/실거래/매물/facility 읽기·캐시 write 모두 회피)
+        return
     db = SessionLocal()
     try:
         from models.complex import Complex
