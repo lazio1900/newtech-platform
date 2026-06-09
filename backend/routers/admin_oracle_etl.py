@@ -4,10 +4,11 @@
 동기화(미러) 실행. 연결은 관리자 등록 Oracle DbConnection(driver='oracle') 사용.
 """
 import json
+import re
 from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from core.auth import require_role
@@ -18,10 +19,30 @@ from services import oracle_etl_service
 router = APIRouter()
 
 
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#]*$")
+_IDENT_TABLE = re.compile(r"^([A-Za-z_][A-Za-z0-9_$#]*\.)?[A-Za-z_][A-Za-z0-9_$#]*$")
+
+
 class MappingUpdate(BaseModel):
     oracle_table: Optional[str] = None
     column_overrides: Optional[Dict[str, str]] = None  # {pg_col: oracle_col} — 다른 것만
     enabled: Optional[bool] = None
+
+    @field_validator("oracle_table")
+    @classmethod
+    def _v_table(cls, v):
+        if v is not None and not _IDENT_TABLE.match(v):
+            raise ValueError("Oracle 테이블명은 식별자 형식이어야 합니다(OWNER.TABLE 허용).")
+        return v
+
+    @field_validator("column_overrides")
+    @classmethod
+    def _v_cols(cls, v):
+        if v:
+            for k, val in v.items():
+                if not _IDENT.match(k) or not _IDENT.match(val):
+                    raise ValueError("컬럼 매핑은 식별자 형식이어야 합니다.")
+        return v
 
 
 @router.get("/mappings")

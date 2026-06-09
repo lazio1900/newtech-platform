@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from decimal import Decimal
 
 from sqlalchemy import BigInteger, Float, Integer, String, Text
@@ -66,6 +67,23 @@ def _norm(v):
     return v
 
 
+# Oracle 식별자 검증 — f-string SQL 조립 전 SQL injection 차단. 테이블은 OWNER.TABLE 허용.
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#]*$")
+_IDENT_TABLE = re.compile(r"^([A-Za-z_][A-Za-z0-9_$#]*\.)?[A-Za-z_][A-Za-z0-9_$#]*$")
+
+
+def _safe_table(name: str) -> str:
+    if not name or not _IDENT_TABLE.match(name):
+        raise ValueError(f"유효하지 않은 Oracle 테이블명: {name!r}")
+    return name
+
+
+def _safe_col(name: str) -> str:
+    if not name or not _IDENT.match(name):
+        raise ValueError(f"유효하지 않은 Oracle 컬럼명: {name!r}")
+    return name
+
+
 def connect_oracle(db: Session):
     """Oracle thin connect — 관리자 DbConnection(oracle) 우선, 없으면 settings.oracle_*."""
     import oracledb
@@ -116,7 +134,9 @@ def resolve_mappings(db: Session) -> list[dict]:
 def run_etl(db: Session) -> dict:
     """Oracle → PG 미러 (테이블별 delete→insert). 한 테이블 실패해도 나머지 진행(개별 보고)."""
     conn, source = connect_oracle(db)
+    conn.call_timeout = 300_000  # 문장당 5분 — 정체 시 무한 hang 방지
     cur = conn.cursor()
+    cur.arraysize = 5000  # 스트리밍 fetch 배치
     tables, total = [], 0
     try:
         for spec in resolve_mappings(db):
@@ -126,15 +146,22 @@ def run_etl(db: Session) -> dict:
                 continue
             try:
                 model.__table__.create(engine, checkfirst=True)
-                cur.execute(f"SELECT {', '.join(oc for _, oc in cols)} FROM {otable}")
-                rows = cur.fetchall()
+                # 식별자 검증(SQL injection 차단) 후 조립
+                safe_table = _safe_table(otable)
+                safe_cols = [_safe_col(oc) for _, oc in cols]
                 pg_cols = [pg for pg, _ in cols]
                 db.query(model).delete()
-                for row in rows:
+                cur.execute(f"SELECT {', '.join(safe_cols)} FROM {safe_table}")
+                n = 0
+                for row in cur:  # fetchall 대신 스트리밍 + 주기적 flush/expunge 로 메모리 바운드
                     db.add(model(**{pg_cols[i]: _norm(row[i]) for i in range(len(pg_cols))}))
-                db.commit()
-                total += len(rows)
-                tables.append({"pg_table": model.__tablename__, "oracle_table": otable, "status": "ok", "rows": len(rows)})
+                    n += 1
+                    if n % 5000 == 0:
+                        db.flush()
+                        db.expunge_all()
+                db.commit()  # delete+insert 단일 트랜잭션(테이블별 원자적)
+                total += n
+                tables.append({"pg_table": model.__tablename__, "oracle_table": otable, "status": "ok", "rows": n})
             except Exception as e:
                 db.rollback()
                 tables.append({"pg_table": model.__tablename__, "oracle_table": otable,
@@ -147,15 +174,24 @@ def run_etl(db: Session) -> dict:
 
 def probe(db: Session) -> dict:
     """Oracle 실제 테이블/컬럼 목록 — 매핑 작성 보조(현장 autofill)."""
+    # 시스템 스키마 제외 — 접속계정 소유(USER_*) + SELECT 권한 있는 타 스키마(ALL_*) 모두.
+    sys_owners = ("SYS", "SYSTEM", "XDB", "MDSYS", "CTXSYS", "DBSNMP", "OUTLN", "WMSYS",
+                  "APPQOSSYS", "DVSYS", "AUDSYS", "LBACSYS", "OJVMSYS", "ORDSYS", "ORDDATA",
+                  "GSMADMIN_INTERNAL", "REMOTE_SCHEDULER_AGENT", "DBSFWUSER")
+    not_in = ", ".join(f"'{o}'" for o in sys_owners)
     conn, source = connect_oracle(db)
     cur = conn.cursor()
     try:
-        cur.execute("SELECT table_name FROM user_tables ORDER BY table_name")
-        all_tables = [r[0] for r in cur.fetchall()]
+        cur.execute(f"SELECT owner, table_name FROM all_tables WHERE owner NOT IN ({not_in}) ORDER BY owner, table_name")
+        rows = cur.fetchall()
+        # 접속계정 소유는 bare 이름, 그 외는 OWNER.TABLE (매핑에 그대로 넣을 수 있게)
+        me = (conn.username or "").upper()
+        all_tables = [t if o == me else f"{o}.{t}" for o, t in rows]
         columns: dict[str, list[str]] = {}
-        cur.execute("SELECT table_name, column_name FROM user_tab_columns ORDER BY table_name, column_id")
-        for tname, cname in cur.fetchall():
-            columns.setdefault(tname, []).append(cname)
+        cur.execute(f"SELECT owner, table_name, column_name FROM all_tab_columns WHERE owner NOT IN ({not_in}) ORDER BY owner, table_name, column_id")
+        for owner, tname, cname in cur.fetchall():
+            key = tname if owner == me else f"{owner}.{tname}"
+            columns.setdefault(key, []).append(cname)
     finally:
         cur.close()
         conn.close()
