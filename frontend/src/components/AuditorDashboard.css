@@ -655,3 +655,14 @@
   overflow-y: auto;
   padding: 20px 24px;
 }
+
+/* INTERNAL_ONLY — 내부형식에 없는 정보 "확인 불가" 안내 카드 */
+.daf-unavailable {
+  background: #F9FAFB;
+  border: 1px dashed #D1D5DB;
+  border-radius: 8px;
+  padding: 20px 24px;
+  color: #6B7280;
+  font-size: 14px;
+  text-align: center;
+}

@@ -279,7 +279,7 @@ export interface AnalysisResponse {
   property_rights_info: PropertyRightsData;
   borrower_info: BorrowerData;
   guarantor_info: GuarantorData;
-  credit_data: CreditDataWithHistory;
+  credit_data: CreditDataWithHistory | null;  // INTERNAL_ONLY: 내부형식에 시세 없으면 null(확인 불가)
   ai_analysis: AiAnalysis;
   nearby_property_trends?: NearbyPropertyTrends;
   price_per_pyeong_trend?: PricePerPyeongTrend;

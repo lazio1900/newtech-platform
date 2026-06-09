@@ -258,18 +258,22 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
       </div>
 
       <h2 className="section-divider">시세 분석</h2>
-      <div className="layout-row-market">
-        <div className="market-left">
-          <CreditSources data={data.credit_data} />
-          <PriceCharts data={data.credit_data} loanDuration={loanDuration} />
+      {data.credit_data ? (
+        <div className="layout-row-market">
+          <div className="market-left">
+            <CreditSources data={data.credit_data} />
+            <PriceCharts data={data.credit_data} loanDuration={loanDuration} />
+          </div>
+          <div className="market-right">
+            <AIMarketAnalysis
+              analysis={data.ai_analysis.market_analysis}
+              jbDetail={data.credit_data.jb_detail}
+            />
+          </div>
         </div>
-        <div className="market-right">
-          <AIMarketAnalysis
-            analysis={data.ai_analysis.market_analysis}
-            jbDetail={data.credit_data.jb_detail}
-          />
-        </div>
-      </div>
+      ) : (
+        <div className="card daf-unavailable">시세 확인 불가 — 내부형식(CCTR_*)에 이 단지 시세 데이터가 없습니다.</div>
+      )}
 
       <h2 className="section-divider">유사 물건 분석</h2>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'stretch' }}>
@@ -312,13 +316,17 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
 
       <h2 className="section-divider">LTV 분석</h2>
       <div className="layout-row-full">
-        <LtvCalculation
-          rightsData={data.property_rights_info}
-          creditData={data.credit_data}
-          loanAmount={loanAmount}
-          interestRate={interestRate}
-          loanDuration={loanDuration}
-        />
+        {data.credit_data ? (
+          <LtvCalculation
+            rightsData={data.property_rights_info}
+            creditData={data.credit_data}
+            loanAmount={loanAmount}
+            interestRate={interestRate}
+            loanDuration={loanDuration}
+          />
+        ) : (
+          <div className="card daf-unavailable">LTV 확인 불가 — 시세(분모) 데이터가 없습니다. 근저당 채권최고액 {data.property_rights_info.max_bond_amount.toLocaleString()}원만 확인됨.</div>
+        )}
       </div>
 
       <h2 className="section-divider">AI 종합 의견 및 심사역 의견</h2>
@@ -376,7 +384,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   ceo_name: selectedApp.ceo_name,
                   property_address: data.property_basic_info.address,
                   loan_amount: selectedApp.loan_amount,
-                  execution_price: data.credit_data.kb_price.estimated
+                  execution_price: data.credit_data?.kb_price.estimated ?? 0
                 });
               } catch (err) {
                 console.error('Monitoring registration failed:', err);
@@ -404,10 +412,11 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
 
       {showReviewReport && (() => {
         const ri = data.property_rights_info;
-        const kb = data.credit_data.kb_price;
-        const molit = data.credit_data.molit_transactions;
-        const naver = data.credit_data.naver_listings;
-        const jbFair = data.credit_data.jb_fair_price ?? kb.low;
+        // INTERNAL_ONLY: 시세 없으면 확인 불가 → 0/빈값으로 표시(보고서는 '-' 처리됨)
+        const kb = data.credit_data?.kb_price ?? { estimated: 0, high: 0, low: 0, trend: '-', history: [] };
+        const molit = data.credit_data?.molit_transactions ?? { recent_price: null, transaction_date: null, trend: '-', history: [] };
+        const naver = data.credit_data?.naver_listings ?? { avg_asking: null, listing_count: 0, trend: '-', history: [] };
+        const jbFair = data.credit_data?.jb_fair_price ?? kb.low;
         const ls = data.ai_analysis.location_scores;
         const totalPrior = (ri.max_bond_amount || 0) + (ri.tenant_deposit || 0) + loanAmount;
         const ltvCurrent = kb.estimated > 0 ? (totalPrior / kb.estimated * 100).toFixed(1) : '-';
