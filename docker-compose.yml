@@ -29,6 +29,27 @@ services:
       timeout: 3s
       retries: 5
 
+  # 정보계 Oracle 시뮬레이터 — #1 운영 ETL(Oracle→PG) 개발/검증용. 기본 stack 비포함(profile).
+  # 실행: docker compose --profile oracle up -d oracle  /  운영선 이 서비스 대신 사내 Oracle DSN 사용.
+  oracle:
+    image: gvenzl/oracle-free:slim
+    profiles: ["oracle"]
+    restart: unless-stopped
+    ports:
+      - "${ORACLE_PORT:-1521}:1521"
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-oracle}
+      APP_USER: ${ORACLE_APP_USER:-kbsrc}
+      APP_USER_PASSWORD: ${ORACLE_APP_PASSWORD:-kbsrc}
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+
   mineru-api:
     build:
       context: ./mineru-api
@@ -110,3 +131,4 @@ volumes:
   postgres_data:
   redis_data:
   mineru_models:
+  oracle_data:

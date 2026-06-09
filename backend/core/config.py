@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 60
     llm_daily_call_limit: int = 1000
 
+    # ----- 정보계 Oracle (#1 운영 ETL: Oracle CCTR_*/CUWT_NIC_* → PG 미러) -----
+    # 운영 전환 = 이 3개 값만 사내 정보계로 교체. dev 는 로컬 oracle 컨테이너(compose profile).
+    oracle_dsn: Optional[str] = None       # 예: "oracle:1521/FREEPDB1"(dev) / "host:port/service"(prod)
+    oracle_user: Optional[str] = None      # dev: kbsrc
+    oracle_password: Optional[str] = None  # dev: kbsrc
+
     # ----- 등기부등본 API (별도 마이크로서비스, 8100 포트) -----
     registry_api_url: str = "http://localhost:8100"
     registry_internal_token: Optional[str] = None
