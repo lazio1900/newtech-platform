@@ -45,6 +45,18 @@ def _unq_from_text(text: str) -> str:
     return _digits(m.group(1)) if m else ""
 
 
+_EXCL_M2 = re.compile(r"([0-9]+\.[0-9]+)\s*(?:m2|㎡|m²)")
+
+
+def _exclusive_m2_from_text(text: str):
+    """표제부 '전유부분의 건물의 표시' 섹션의 첫 면적(전유면적) — 평형 자동선택용. 없으면 None."""
+    idx = (text or "").find("전유부분의 건물의 표시")
+    if idx < 0:
+        return None
+    m = _EXCL_M2.search(text[idx:idx + 600])
+    return m.group(1) if m else None
+
+
 def _amount(text: str) -> int:
     m = _AMOUNT.search(text or "")
     if not m:
@@ -59,7 +71,7 @@ def _count_kw(entries, *kws) -> int:
     return sum(1 for e in entries if any(k in (e.get("purpose") or "") for k in kws))
 
 
-def explode(d: dict, unq: str, today: str) -> list:
+def explode(d: dict, unq: str, today: str, exclusive_m2: str | None = None) -> list:
     """추출 dict → nice_rles_* ORM 인스턴스 목록. NICE_MSGM_NO 등 구조키는 합성."""
     msgm = ("PDF" + unq)[:20]
     rows: list = []
@@ -111,6 +123,11 @@ def explode(d: dict, unq: str, today: str) -> list:
         rows.append(rn.NiceRlesHeader(
             nice_msgm_no=msgm, rles_unq_no=unq, hdr_dtl_cd="C12", hdr_ctnt=addr,
         ))
+    # 전유면적 E82 — 평형 자동선택용
+    if exclusive_m2:
+        rows.append(rn.NiceRlesHeader(
+            nice_msgm_no=msgm, rles_unq_no=unq, hdr_dtl_cd="E82", hdr_ctnt=f"{exclusive_m2}㎡",
+        ))
     return rows
 
 
@@ -145,7 +162,7 @@ def main() -> None:
     db = SessionLocal()
     try:
         d = extract_rights_dict(db, text, label=os.path.basename(pdf_path))
-        rows = explode(d, unq, datetime.now().strftime("%Y%m%d"))
+        rows = explode(d, unq, datetime.now().strftime("%Y%m%d"), _exclusive_m2_from_text(text))
 
         for t in _TABLES:
             t.__table__.create(engine, checkfirst=True)
