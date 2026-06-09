@@ -14,6 +14,7 @@ from models.audit import SearchHistory, AnalysisAuditLog, SearchField
 from models.lender import Lender
 from models.data_source_mapping import DataSourceMapping
 from models.db_connection import DbConnection
+from models.oracle_etl_mapping import OracleEtlMapping
 from models.llm_connection import LlmConnection
 from models.llm_prompt import LlmPrompt
 
@@ -48,6 +49,7 @@ __all__ = [
     "Lender",
     "DataSourceMapping",
     "DbConnection",
+    "OracleEtlMapping",
     "LlmConnection",
     "LlmPrompt",
     # 수집기 소유 (read-only)

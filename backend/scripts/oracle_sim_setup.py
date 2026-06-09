@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.config import settings  # noqa: E402
 from core.database import SessionLocal  # noqa: E402
-from scripts.internal_oracle_common import (  # noqa: E402
+from services.oracle_etl_service import (  # noqa: E402
     TABLE_MAP, connect_oracle, mirror_columns, oracle_type,
 )
 
@@ -23,9 +23,9 @@ def main() -> None:
         print("거부: dev 전용(로컬 Oracle 시뮬레이터). 운영 정보계엔 실행 금지.", file=sys.stderr)
         sys.exit(2)
 
-    ora = connect_oracle()
-    cur = ora.cursor()
     db = SessionLocal()
+    ora, _ = connect_oracle(db)
+    cur = ora.cursor()
     try:
         for model, otable in TABLE_MAP:
             cols = mirror_columns(model)
