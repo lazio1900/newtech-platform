@@ -130,6 +130,11 @@ docker compose exec backend python scripts/load_pdf_as_nice.py /tmp/r.pdf <부�
 적재 후 `REGISTRY_SOURCE=auto`로 두면 신청의 `rles_unq_no`가 적재돼 있으면 `nice_rles_*`를,
 없으면 기존 PDF 경로로 폴백한다. 결정적 빌드+LTV 검증은 step5 문서 참조.
 
+신청폼 ②의 **부동산고유번호 검색·조회**(주소→고유번호 후보, 결정적 요약 미리보기)도
+`REGISTRY_SOURCE=auto|db`에서만 동작한다(pdf면 503). 검색 출처는 적재된 `nice_rles_*`뿐 —
+사내 심사시스템 고유번호 검색은 앱 호출 불가라, 향후 사내 디렉토리가 열리면
+`registry_db_service.search_registries`만 교체하면 된다.
+
 ---
 
 ## 5. prod 모드 — 폐쇄망 운영

@@ -16,6 +16,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import nullslast
 from sqlalchemy.orm import Session
 
 from models.loan import LoanApplication
@@ -34,9 +35,10 @@ _GEUNJEODANG_SETTING = "근저당권설정"  # max_bond 합산 대상(정확 일
 _JEONSE_SETTING = "전세권설정"  # tenant_deposit 합산 대상(정확 일치 — 변경/이전 제외, max_bond 와 대칭)
 # 갑구 소유권 외(권리침해) 목적 키워드
 _GAP_OTHER_KEYWORDS = ("압류", "가압류", "가처분", "경매")
-# 표제부 주소 코드
+# 표제부 코드
 _HDR_JIBEON = "C11"
 _HDR_ROAD = "C12"
+_HDR_HO = "E43"
 
 _SUMMARY_SYSTEM = """당신은 한국 등기부등본 분석 전문가입니다.
 주어진 '구조화된 권리 데이터(JSON)'만을 근거로 각 항목 요약을 작성합니다.
@@ -63,6 +65,7 @@ def _empty_result() -> dict:
         "seizure_summary": "",
         "priority_summary": "",
         "comprehensive_opinion": "",
+        "property_address": "",
         "inquiry_date": "",
         "seizure_count": 0,
         "prov_seizure_count": 0,
@@ -120,11 +123,109 @@ def registry_exists(db: Session, rles_unq_no: str) -> bool:
     )
 
 
+def _latest_basics(db: Session) -> dict:
+    """rles_unq_no → 최신 스냅샷(IQRY_DT 최대) 기본행."""
+    latest: dict = {}
+    for b in (
+        db.query(NiceRlesBasic)
+        .order_by(NiceRlesBasic.rles_unq_no, nullslast(NiceRlesBasic.iqry_dt.desc()))
+        .all()
+    ):
+        latest.setdefault(b.rles_unq_no, b)
+    return latest
+
+
+def search_registries(
+    db: Session,
+    *,
+    sido: Optional[str] = None,
+    sigungu: Optional[str] = None,
+    dong: Optional[str] = None,
+    complex_name: Optional[str] = None,
+    building: Optional[str] = None,
+    unit: Optional[str] = None,
+    limit: int = 20,
+) -> list:
+    """적재된 등기부(nice_rles_*) 중 주소 토큰으로 부동산고유번호 후보 검색.
+
+    사내 심사시스템의 고유번호 검색은 앱에서 호출 불가 → 앱이 미러한 등기부 한정
+    (dev=샘플, prod=수집기가 미러한 물건). 향후 사내 디렉토리가 열리면 이 함수만 교체.
+
+    gate=시군구(필수 좁힘), boost=시도·읍면동·단지명·동·호(랭킹). 읍면동은 법정동/행정동
+    표기차로 gate 에 두면 오탈락하므로 boost 로 둔다. 표제부 평문 전부를 blob 으로
+    파이썬 substring(in) 매칭(C11 지번에 단지·동, E43 에 호가 들어있음, 대소문자 구분).
+    """
+    latest = _latest_basics(db)
+    if not latest:
+        return []
+
+    msgms = {b.nice_msgm_no for b in latest.values()}
+    blobs: dict = {}
+    for h in (
+        db.query(NiceRlesHeader)
+        .filter(NiceRlesHeader.nice_msgm_no.in_(msgms))
+        .all()
+    ):
+        if h.hdr_ctnt:
+            blobs.setdefault(h.rles_unq_no, {}).setdefault(h.hdr_dtl_cd, h.hdr_ctnt)
+
+    gate = [t.strip() for t in (sigungu,) if t and t.strip()]
+    boost = [t.strip() for t in (sido, dong, complex_name) if t and t.strip()]
+    # 동/호는 접미사 포함('제105동'/'제302호')으로 매칭해 단일 숫자 오탐을 줄임
+    if building and building.strip():
+        boost.append(f"{building.strip()}동")
+    if unit and unit.strip():
+        boost.append(f"{unit.strip()}호")
+    if not gate and not boost:
+        return []
+
+    out = []
+    for unq, b in latest.items():
+        hdr = blobs.get(unq, {})
+        blob = " ".join(hdr.values())
+        if gate and not all(g in blob for g in gate):
+            continue
+        score = sum(1 for t in gate + boost if t in blob)
+        out.append({
+            "rles_unq_no": unq,
+            "road_address": hdr.get(_HDR_ROAD, ""),
+            "jibun_address": hdr.get(_HDR_JIBEON, ""),
+            "unit": hdr.get(_HDR_HO, ""),
+            "mortgage_count": b.fxcl_ccnt or 0,
+            "seizure_count": b.seiz_ccnt or 0,
+            "inquiry_date": b.iqry_dt or "",
+            "_score": score,
+        })
+
+    out.sort(key=lambda r: (r["_score"], r["inquiry_date"]), reverse=True)
+    for r in out:
+        del r["_score"]
+    return out[:limit]
+
+
+def build_preview(db: Session, rles_unq_no: str) -> dict:
+    """선택/입력한 부동산고유번호의 등기부 결정적 요약(LLM 없음, 폼 조회용)."""
+    rles_unq_no = _digits(rles_unq_no)
+    det = _build_deterministic(db, rles_unq_no) if len(rles_unq_no) == 14 else None
+    if det is None:
+        return {"rles_unq_no": rles_unq_no, "exists": False}
+    return {
+        "rles_unq_no": rles_unq_no,
+        "exists": True,
+        "property_address": det.get("property_address", ""),
+        "inquiry_date": det["inquiry_date"],
+        "mortgage_count": det["mortgage_count"],
+        "seizure_count": det["seizure_count"],
+        "max_bond_amount": det["max_bond_amount"],
+        "owners": [e["name"] for e in det["ownership_entries"] if e.get("name")],
+    }
+
+
 def _current_inquiry_date(db: Session, rles_unq_no: str) -> Optional[str]:
     row = (
         db.query(NiceRlesBasic.iqry_dt)
         .filter(NiceRlesBasic.rles_unq_no == rles_unq_no)
-        .order_by(NiceRlesBasic.iqry_dt.desc())
+        .order_by(nullslast(NiceRlesBasic.iqry_dt.desc()))
         .first()
     )
     return row[0] if row else None
@@ -136,7 +237,7 @@ def _build_deterministic(db: Session, rles_unq_no: str) -> Optional[dict]:
     basic = (
         db.query(NiceRlesBasic)
         .filter(NiceRlesBasic.rles_unq_no == rles_unq_no)
-        .order_by(NiceRlesBasic.iqry_dt.desc())
+        .order_by(nullslast(NiceRlesBasic.iqry_dt.desc()))
         .first()
     )
     if not basic:
@@ -162,6 +263,7 @@ def _build_deterministic(db: Session, rles_unq_no: str) -> Optional[dict]:
     )
     hdr = {h.hdr_dtl_cd: (h.hdr_ctnt or "") for h in headers if h.hdr_ctnt}
     property_addr = hdr.get(_HDR_ROAD) or hdr.get(_HDR_JIBEON) or ""
+    out["property_address"] = property_addr
 
     # 소유자 (요약명세 BRF_I)
     for b in (

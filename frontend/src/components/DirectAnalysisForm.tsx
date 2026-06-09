@@ -10,6 +10,7 @@ import { complexesApi } from '../api/complexes';
 import { lendersApi, type Lender } from '../api/lenders';
 import { regionsApi, RegionItem, DongItem } from '../api/regions';
 import { registryApi } from '../api/registry';
+import { registryDbApi, type RegistryCandidate, type RegistryPreview } from '../api/registryDb';
 import type { Area, Complex } from '@/types/complex';
 import './DirectAnalysisForm.css';
 
@@ -101,6 +102,13 @@ export default function DirectAnalysisForm({
   } | null>(null);
   // 등기부 표제부에서 추출된 전용면적 (자동 평형 제안용)
   const [registryExclusiveM2, setRegistryExclusiveM2] = useState<number | null>(null);
+
+  // 부동산고유번호 검색(적재된 등기부에서) + DB 조회 미리보기
+  const [unqSearchLoading, setUnqSearchLoading] = useState<boolean>(false);
+  const [unqSearchError, setUnqSearchError] = useState<string | null>(null);
+  const [unqCandidates, setUnqCandidates] = useState<RegistryCandidate[] | null>(null);
+  const [dbPreview, setDbPreview] = useState<RegistryPreview | null>(null);
+  const [dbPreviewLoading, setDbPreviewLoading] = useState<boolean>(false);
 
   // 차주(대부업체) — 마스터에서 선택
   const [lenders, setLenders] = useState<Lender[]>([]);
@@ -256,6 +264,7 @@ export default function DirectAnalysisForm({
       isPrefillingRef.current = false;
     } else {
       setSelectedComplex(null);
+      clearUnqState();
     }
     runComplexSearch(complexQuery);
   }, [selectedDong]);
@@ -292,6 +301,14 @@ export default function DirectAnalysisForm({
     return () => { cancelled = true; };
   }, [selectedComplex]);
 
+  // ② 등기부 상태(고유번호·검색후보·조회결과) 초기화 — ① 물건이 바뀌면 옛 등기부 잔존 방지
+  const clearUnqState = () => {
+    setRlesUnqNo('');
+    setUnqCandidates(null);
+    setDbPreview(null);
+    setUnqSearchError(null);
+  };
+
   const resetComplexAndDownstream = () => {
     setSelectedComplex(null);
     setComplexResults([]);
@@ -302,6 +319,7 @@ export default function DirectAnalysisForm({
     setHo('');
     setRegistryResult(null);
     setRegistryExclusiveM2(null);
+    clearUnqState();
   };
 
   /** 등기부 발급 완료 후 표제부 면적 추출 + 가장 가까운 평형 자동 선택. */
@@ -484,6 +502,50 @@ export default function DirectAnalysisForm({
     }
   };
 
+  const previewUnq = async (raw: string) => {
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length !== 14) { alert('부동산고유번호는 숫자 14자리입니다. (예: 1149-1996-233513)'); return; }
+    setDbPreviewLoading(true);
+    setDbPreview(null);
+    setUnqSearchError(null);
+    try {
+      setDbPreview(await registryDbApi.preview(digits));
+    } catch (e) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string };
+      setUnqSearchError(err?.response?.data?.detail || err?.message || '등기부 조회 실패');
+    } finally {
+      setDbPreviewLoading(false);
+    }
+  };
+
+  const handleSearchUnq = async () => {
+    setUnqSearchLoading(true);
+    setUnqSearchError(null);
+    setUnqCandidates(null);
+    try {
+      setUnqCandidates(await registryDbApi.search({
+        sido: selectedSido?.name,
+        sigungu: selectedSigungu?.name,
+        dong: selectedDong?.name,
+        complex: selectedComplex?.name,
+        building: dong.trim() || undefined,
+        unit: ho.trim() || undefined,
+      }));
+    } catch (e) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string };
+      setUnqSearchError(err?.response?.data?.detail || err?.message || '부동산고유번호 검색 실패');
+    } finally {
+      setUnqSearchLoading(false);
+    }
+  };
+
+  const handleSelectCandidate = (c: RegistryCandidate) => {
+    setRlesUnqNo(c.rles_unq_no);
+    setUnqCandidates(null);
+    setUnqSearchError(null);
+    void previewUnq(c.rles_unq_no);
+  };
+
   const handleSubmit = () => {
     if (!selectedLender) { alert("'대부업체 등록' 탭에서 차주 업체를 먼저 등록·선택해주세요."); return; }
     if (!selectedComplex) { alert('단지를 선택해주세요.'); return; }
@@ -592,7 +654,7 @@ export default function DirectAnalysisForm({
       </div>
 
       <div className="daf-section">
-        <h3>담보 물건 정보</h3>
+        <h3>① 담보 물건 정보</h3>
 
         {/* 시도/시군구/읍면동 */}
         <div className="daf-field" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
@@ -670,7 +732,7 @@ export default function DirectAnalysisForm({
             )}
 
             {selectedComplex && (
-              <button type="button" onClick={() => { setSelectedComplex(null); setAreas([]); }}
+              <button type="button" onClick={() => { setSelectedComplex(null); setAreas([]); clearUnqState(); }}
                       disabled={submitting} className="daf-link-btn">
                 ← 다른 단지 선택
               </button>
@@ -706,75 +768,6 @@ export default function DirectAnalysisForm({
               </div>
             </div>
 
-            {/* 부동산고유번호 (폐쇄망 등기부 조인키) */}
-            <div className="daf-field">
-              <label>부동산고유번호</label>
-              <input type="text" value={rlesUnqNo}
-                     onChange={(e) => setRlesUnqNo(e.target.value)}
-                     placeholder="예: 1149-1996-233513 (숫자 14자리)" disabled={submitting} />
-            </div>
-
-            {/* 등기부등본 */}
-            <div className="daf-field">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" onClick={handleFetchRegistry}
-                        disabled={submitting || registryLoading || !dong.trim() || !ho.trim()}
-                        className="daf-registry-btn"
-                        style={{
-                          background: registryLoading ? '#7DCCE5' : '#006FBD',
-                          cursor: registryLoading ? 'wait' : 'pointer',
-                          opacity: (!dong.trim() || !ho.trim()) ? 0.5 : 1,
-                        }}>
-                  {registryLoading ? '처리 중...' : '📄 등기부등본 가져오기'}
-                </button>
-                <span style={{ color: '#9CA3AF', fontSize: 12 }}>또는</span>
-                <button type="button" onClick={() => uploadInputRef.current?.click()}
-                        disabled={submitting || registryLoading}
-                        style={{
-                          padding: '8px 14px', background: '#fff', color: '#006FBD',
-                          border: '1px solid #006FBD', borderRadius: 6, fontWeight: 600,
-                          cursor: registryLoading ? 'wait' : 'pointer',
-                        }}>
-                  ⬆ PDF 직접 업로드
-                </button>
-                <input ref={uploadInputRef} type="file" accept="application/pdf,.pdf"
-                       style={{ display: 'none' }} onChange={handleUploadRegistry} />
-              </div>
-              {registryLoading && (
-                <div className="daf-registry-hint">처리에 시간이 소요될 수 있습니다.</div>
-              )}
-              {registryResult && (
-                <div className={`daf-registry-result ${registryResult.error ? 'err' : 'ok'}`}>
-                  {registryResult.error || (
-                    <>
-                      <strong>발급 {registryResult.status}</strong>
-                      {registryResult.ic_id ? ` (ID: ${registryResult.ic_id})` : ''}
-                      {registryResult.pdf_url && registryResult.ic_id && (
-                        <>
-                          {' · '}
-                          <button type="button" className="daf-link-btn-inline"
-                                  onClick={() => registryApi.openPdf(registryResult.ic_id!)}>
-                            PDF 다운로드
-                          </button>
-                        </>
-                      )}
-                      {registryResult.cached && ' · 캐시 (재발급 비용 0)'}
-                    </>
-                  )}
-                  {registryMatch?.address && (
-                    <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>
-                      ↳ <strong>매칭 주소</strong>: {registryMatch.address}
-                      {registryMatch.dong ? ` ${registryMatch.dong}동` : ''}
-                      {registryMatch.ho ? ` ${registryMatch.ho}호` : ''}
-                      <span style={{ color: '#9CA3AF', marginLeft: 6 }}>
-                        — 이 주소가 의도한 물건과 다르면 다시 조회하거나 PDF 직접 업로드를 사용하세요.
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
             {/* 평형 — 등기부 표제부 전용면적 기반 자동 선택, 다르면 수정 가능 */}
             <div className="daf-field">
               <label>평형 <span className="daf-required">*</span></label>
@@ -787,7 +780,7 @@ export default function DirectAnalysisForm({
                   <select value={selectedArea?.id ?? ''}
                           onChange={(e) => setSelectedArea(areas.find((a) => a.id === parseInt(e.target.value, 10)) ?? null)}
                           disabled={submitting} className="daf-select">
-                    <option value="">{registryResult?.status === 'completed' ? '직접 선택' : '등기부 발급 후 자동 선택됩니다'}</option>
+                    <option value="">{registryResult?.status === 'completed' ? '직접 선택' : '직접 선택 또는 등기부 발급 후 자동 선택'}</option>
                     {areas.map((a) => (
                       <option key={a.id} value={a.id}>
                         전용 {a.exclusive_m2.toFixed(2)}㎡
@@ -810,6 +803,147 @@ export default function DirectAnalysisForm({
             </div>
           </>
         )}
+      </div>
+
+      {/* ② 등기부등본 (권리) */}
+      <div className="daf-section">
+        <h3>② 등기부등본</h3>
+
+        {/* 부동산고유번호: 직접 입력 + 검색(적재된 등기부) + 조회 */}
+        <div className="daf-field">
+          <label>부동산고유번호</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input type="text" value={rlesUnqNo}
+                   onChange={(e) => { setRlesUnqNo(e.target.value); setDbPreview(null); setUnqSearchError(null); }}
+                   placeholder="예: 1149-1996-233513 (숫자 14자리)"
+                   disabled={submitting} style={{ flex: 1, minWidth: 220 }} />
+            <button type="button" onClick={handleSearchUnq}
+                    disabled={submitting || unqSearchLoading || !selectedSigungu}
+                    className="daf-link-btn"
+                    style={{ whiteSpace: 'nowrap', opacity: !selectedSigungu ? 0.5 : 1 }}>
+              {unqSearchLoading ? '검색 중…' : '🔍 검색'}
+            </button>
+            <button type="button" onClick={() => previewUnq(rlesUnqNo)}
+                    disabled={submitting || dbPreviewLoading || rlesUnqNo.replace(/\D/g, '').length !== 14}
+                    className="daf-link-btn"
+                    style={{ whiteSpace: 'nowrap', opacity: rlesUnqNo.replace(/\D/g, '').length !== 14 ? 0.5 : 1 }}>
+              {dbPreviewLoading ? '조회 중…' : '조회'}
+            </button>
+          </div>
+          <div className="daf-hint">
+            {!selectedSigungu && (
+              <span className="daf-status warning">① 에서 시군구·단지·동/호를 선택하면 검색이 정확해집니다</span>
+            )}
+            {unqSearchError && <span className="daf-status warning">⚠ {unqSearchError}</span>}
+          </div>
+
+          {/* 검색 후보 — ① 선택값으로 좁힌 적재된 등기부 목록 */}
+          {unqCandidates && unqCandidates.length > 0 && (
+            <div className="daf-complex-list">
+              {unqCandidates.map((c) => (
+                <button key={c.rles_unq_no} type="button" onClick={() => handleSelectCandidate(c)}
+                        disabled={submitting} className="daf-complex-item">
+                  <strong>{c.rles_unq_no}</strong>
+                  <span className="daf-complex-addr">
+                    {(c.jibun_address || c.road_address)}{c.unit ? ` ${c.unit}` : ''}
+                  </span>
+                  <span className="daf-complex-units">
+                    근저당 {c.mortgage_count} · 압류 {c.seizure_count} · 조회 {c.inquiry_date}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {unqCandidates && unqCandidates.length === 0 && (
+            <div className="daf-hint">
+              <span className="daf-status warning">검색 결과 없음 — 직접 입력하거나 아래에서 등기부를 발급하세요</span>
+            </div>
+          )}
+
+          {/* 조회 결과 (등기부 DB) */}
+          {dbPreview && (dbPreview.exists ? (
+            <div className="daf-registry-result ok">
+              <strong>✓ 등기부 적재됨</strong>{dbPreview.inquiry_date ? ` · 조회일 ${dbPreview.inquiry_date}` : ''}
+              <div style={{ marginTop: 6, fontSize: 12, color: '#374151', lineHeight: 1.6 }}>
+                {dbPreview.property_address && <>↳ {dbPreview.property_address}<br /></>}
+                소유자 {(dbPreview.owners && dbPreview.owners.length ? dbPreview.owners.join(', ') : '—')}
+                {' · '}근저당 {dbPreview.mortgage_count ?? 0}건
+                {' · '}채권최고액 합계 <strong>{(dbPreview.max_bond_amount ?? 0).toLocaleString()}원</strong>
+                {dbPreview.seizure_count ? ` · 압류 ${dbPreview.seizure_count}건` : ''}
+              </div>
+            </div>
+          ) : (
+            <div className="daf-registry-result err">
+              <strong>✗ 미적재</strong> — 이 고유번호의 등기부가 DB에 없습니다. 직접 발급/업로드하세요.
+            </div>
+          ))}
+        </div>
+
+        {/* 외부 발급(폴백) — 단지·동·호 기반 IROS 발급 또는 PDF 업로드 */}
+        <div className="daf-field">
+          <label>외부 발급 (폴백)</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" onClick={handleFetchRegistry}
+                    disabled={submitting || registryLoading || !selectedComplex || !dong.trim() || !ho.trim()}
+                    className="daf-registry-btn"
+                    style={{
+                      background: registryLoading ? '#7DCCE5' : '#006FBD',
+                      cursor: registryLoading ? 'wait' : 'pointer',
+                      opacity: (!selectedComplex || !dong.trim() || !ho.trim()) ? 0.5 : 1,
+                    }}>
+              {registryLoading ? '처리 중...' : '📄 등기부등본 가져오기'}
+            </button>
+            <span style={{ color: '#9CA3AF', fontSize: 12 }}>또는</span>
+            <button type="button" onClick={() => uploadInputRef.current?.click()}
+                    disabled={submitting || registryLoading || !selectedComplex}
+                    style={{
+                      padding: '8px 14px', background: '#fff', color: '#006FBD',
+                      border: '1px solid #006FBD', borderRadius: 6, fontWeight: 600,
+                      cursor: registryLoading ? 'wait' : 'pointer',
+                      opacity: !selectedComplex ? 0.5 : 1,
+                    }}>
+              ⬆ PDF 직접 업로드
+            </button>
+            <input ref={uploadInputRef} type="file" accept="application/pdf,.pdf"
+                   style={{ display: 'none' }} onChange={handleUploadRegistry} />
+          </div>
+          {!selectedComplex && (
+            <div className="daf-hint"><span className="daf-status warning">① 에서 단지·동/호를 먼저 선택하세요</span></div>
+          )}
+          {registryLoading && (
+            <div className="daf-registry-hint">처리에 시간이 소요될 수 있습니다.</div>
+          )}
+          {registryResult && (
+            <div className={`daf-registry-result ${registryResult.error ? 'err' : 'ok'}`}>
+              {registryResult.error || (
+                <>
+                  <strong>발급 {registryResult.status}</strong>
+                  {registryResult.ic_id ? ` (ID: ${registryResult.ic_id})` : ''}
+                  {registryResult.pdf_url && registryResult.ic_id && (
+                    <>
+                      {' · '}
+                      <button type="button" className="daf-link-btn-inline"
+                              onClick={() => registryApi.openPdf(registryResult.ic_id!)}>
+                        PDF 다운로드
+                      </button>
+                    </>
+                  )}
+                  {registryResult.cached && ' · 캐시 (재발급 비용 0)'}
+                </>
+              )}
+              {registryMatch?.address && (
+                <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>
+                  ↳ <strong>매칭 주소</strong>: {registryMatch.address}
+                  {registryMatch.dong ? ` ${registryMatch.dong}동` : ''}
+                  {registryMatch.ho ? ` ${registryMatch.ho}호` : ''}
+                  <span style={{ color: '#9CA3AF', marginLeft: 6 }}>
+                    — 이 주소가 의도한 물건과 다르면 다시 조회하거나 PDF 직접 업로드를 사용하세요.
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 대출 조건 */}
