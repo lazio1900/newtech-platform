@@ -289,11 +289,14 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
             data={data.nearby_property_trends}
           />
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <AINearbyAnalysis
-            nearbyAnalysis={data.ai_analysis.nearby_analysis}
-            similarCount={data.nearby_property_trends?.similar_properties.length || 0}
-          />
+        {/* 우측 셀은 absolute 로 띄워 높이를 좌측 카드에 맞추고, 길면 카드 내부에서 스크롤 */}
+        <div style={{ position: 'relative', minHeight: 0 }}>
+          <div style={{ position: 'absolute', inset: 0 }}>
+            <AINearbyAnalysis
+              nearbyAnalysis={data.ai_analysis.nearby_analysis}
+              similarCount={data.nearby_property_trends?.similar_properties.length || 0}
+            />
+          </div>
         </div>
       </div>
       <div className="layout-row-full" style={{ marginTop: 16 }}>
