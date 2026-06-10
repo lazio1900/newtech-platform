@@ -105,11 +105,23 @@ def connect_oracle(db: Session):
     raise RuntimeError("Oracle 연결 미설정 — 관리자 패널에서 Oracle 연결 등록(또는 ORACLE_DSN).")
 
 
+def _info_system_table(default_otable: str) -> str:
+    """정보계 전환 — 기간계 기본 테이블명 첫 글자 C → O (settings.oracle_info_system)."""
+    if settings.oracle_info_system and default_otable[:1] == "C":
+        return "O" + default_otable[1:]
+    return default_otable
+
+
 def resolve_mappings(db: Session) -> list[dict]:
-    """코드 기본(명세) 위에 OracleEtlMapping(DB) 오버레이. admin 표시 + ETL 공용."""
+    """코드 기본(명세) 위에 OracleEtlMapping(DB) 오버레이. admin 표시 + ETL 공용.
+
+    정보계 모드(oracle_info_system)면 기본 테이블명 첫 C→O 로 플립한 값이 default 가 된다.
+    per-table 오버라이드(oracle_table)가 있으면 그게 우선이라 예외 테이블은 UI 로 덮을 수 있다.
+    """
     overrides = {m.internal_table: m for m in db.query(OracleEtlMapping).all()}
     out = []
     for model, default_otable in TABLE_MAP:
+        default_otable = _info_system_table(default_otable)
         itable = model.__tablename__
         ov = overrides.get(itable)
         colov = {}

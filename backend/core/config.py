@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     oracle_user: Optional[str] = None      # dev: kbsrc
     oracle_password: Optional[str] = None  # dev: kbsrc
 
+    # 정보계/기간계 전환 — True 면 기본 Oracle 테이블명 첫 글자 C→O (CCTR_*→OCTR_*, CUWT_*→OUWT_*).
+    # per-table OracleEtlMapping 오버라이드가 있으면 그게 우선. 폐쇄망 정보계 접속 시 True.
+    oracle_info_system: bool = False
+
     # ----- 등기부등본 API (별도 마이크로서비스, 8100 포트) -----
     registry_api_url: str = "http://localhost:8100"
     registry_internal_token: Optional[str] = None
