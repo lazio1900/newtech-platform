@@ -48,6 +48,13 @@ def _norm_name(name):
     return "".join((name or "").split())
 
 
+def _synthetic_apst(kb):
+    """dev 합성 주상복합여부 — 크롤엔 분류 없음. 정보계 APST_YNCD 는 T/F(샘플 준거).
+    kb코드 해시로 ~20% 'T'(주상복합), 나머지 'F'. 운영은 OCTR_KB_APT_M.APST_YNCD 실값."""
+    digits = "".join(c for c in (kb or "") if c.isdigit())
+    return "T" if int(digits or "0") % 5 == 0 else "F"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=300, help="대상 단지 수 (0=전체)")
@@ -99,7 +106,8 @@ def main() -> None:
                 road_nm_bsic_addr=c.road_address, kb_qtn_stdng_cd=c.dong_code,
                 cmcn_ym=_cmcn_ym(c.built_year), tot_gen_cnt=c.total_households,
                 tot_dong_cnt=c.total_buildings, hscm_hgst_flr=c.max_floor,
-                prkn_tcnt=c.total_parking,  # apst_yncd: 크롤 원천 없음 → 정보계(OCTR)에서만 채워짐
+                prkn_tcnt=c.total_parking,
+                apst_yncd=_synthetic_apst(c.kb_complex_id),  # dev 합성(크롤 원천 없음). 운영=OCTR 실값
                 stad_ctnt=c.address,
             ))
             counts["cctr_kb_apt_m"] += 1

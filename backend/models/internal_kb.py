@@ -34,7 +34,7 @@ class CctrKbAptM(Base):
     tot_dong_cnt = Column(Integer, comment="총동수 → total_buildings")
     hscm_hgst_flr = Column(Integer, comment="단지최고층 → max_floor")
     prkn_tcnt = Column(Integer, comment="주차대수 → total_parking")
-    apst_yncd = Column(String(10), comment="주상복합여부코드 (정보계 OCTR_KB_APT_M) → ComplexScores.is_mixed_use 배지")
+    apst_yncd = Column(String(10), comment="주상복합여부코드 T/F (정보계 OCTR_KB_APT_M 샘플 준거) → ComplexScores.is_mixed_use 배지")
     # 주소 조각(공백조인 → complexes.address). null 조각은 skip.
     cnp_nm = Column(String(50), comment="시도명")
     ccw_nm = Column(String(50), comment="시군구명")
