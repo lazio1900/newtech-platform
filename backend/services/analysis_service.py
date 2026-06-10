@@ -163,6 +163,30 @@ def _build_borrower_and_guarantor(
     return borrower, guarantor
 
 
+def _load_analysis_snapshot(db: Session, application_id: str):
+    """박제된 분석 스냅샷(AnalysisData) 로드 — 없거나 깨졌으면 None."""
+    from models.loan import LoanApplication
+    la = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
+    if la and la.analysis_snapshot:
+        try:
+            return AnalysisData.model_validate_json(la.analysis_snapshot)
+        except Exception as e:
+            logger.warning(f"분석 스냅샷 역직렬화 실패({application_id}): {e}")
+    return None
+
+
+def _save_analysis_snapshot(db: Session, application_id: str, data: AnalysisData) -> None:
+    """최초 1회 박제(first-write-wins). 이미 있으면 보존."""
+    from datetime import datetime
+    from models.loan import LoanApplication
+    la = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
+    if la and not la.analysis_snapshot:
+        la.analysis_snapshot = data.model_dump_json()
+        la.analysis_snapshot_at = datetime.utcnow()
+        db.commit()
+        logger.info(f"[analysis] 분석 박제 완료 application={application_id}")
+
+
 def perform_full_analysis(
     company_name: str,
     property_address: str,
@@ -199,6 +223,14 @@ def perform_full_analysis(
         except Exception as e:
             logger.warning(f"DB 연결 불가, 더미 데이터 사용: {e}")
             db = None
+
+    # 0. 박제된 분석 우선 — 심사 무결성: 재진입 시 본인이 판단한 정보 그대로 반환.
+    if application_id and db is not None:
+        _snap = _load_analysis_snapshot(db, application_id)
+        if _snap is not None:
+            if should_close_db:
+                db.close()
+            return AnalysisResponse(status="success", data=_snap)
 
     from core.config import settings as _cfg
     _internal = _cfg.internal_only  # 크롤·더미 차단, ETL된 내부형식만(CCTR_*/nice_rles_*)
@@ -563,6 +595,15 @@ def perform_full_analysis(
         nearby_property_trends=nearby_trends,
         price_per_pyeong_trend=price_per_pyeong
     )
+
+    # 전체 박제 — 단지 매칭 + 실데이터(시세/점수)가 있는 완결 분석만(빈 fallback 은 박제 안 함).
+    has_scores = location_scores is not None or complex_scores is not None
+    is_complete = bool(real_data and real_data.get("complex")) and (credit_data is not None or has_scores)
+    if application_id and db is not None and is_complete:
+        try:
+            _save_analysis_snapshot(db, application_id, analysis_data)
+        except Exception as e:
+            logger.warning(f"분석 박제 실패({application_id}): {e}")
 
     if should_close_db and db is not None:
         db.close()

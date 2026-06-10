@@ -110,6 +110,9 @@ class LoanApplication(Base):
     # AI 종합 의견 + 심사역 권고 캐시
     ai_overall_text = Column(Text, nullable=True, comment="LLM 종합 의견 + 심사역 권고 JSON")
     ai_overall_generated_at = Column(DateTime, nullable=True)
+    # 분석 전체 박제 (심사 무결성) — 최초 완결 분석 시 AnalysisData JSON 저장, 재진입 시 그대로 반환.
+    analysis_snapshot = Column(Text, nullable=True, comment="분석 결과 전체(AnalysisData) JSON 스냅샷")
+    analysis_snapshot_at = Column(DateTime, nullable=True, comment="분석 박제 시각")
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
