@@ -329,7 +329,7 @@ def perform_full_analysis(
             location_scores=location_scores,
         )
         if _internal:
-            property_basic_info.corridor_type = None  # CCTR_* 에 복도타입 없음 → 확인 불가
+            property_basic_info.corridor_type = (real_data.get("complex_master") or {}).get("corridor_type")
             if complex_scores is not None:
                 property_basic_info.location_score = round(
                     (complex_scores.scale + complex_scores.age + complex_scores.parking

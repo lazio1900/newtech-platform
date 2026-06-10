@@ -17,7 +17,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from models.complex import Area, Complex
-from models.internal_kb import CctrAptTxcsHist, CctrKbAptM, CctrKbAptQtnL
+from models.internal_kb import CctrAptTxcsHist, CctrKbAptM, CctrKbAptPntpI, CctrKbAptQtnL
 from models.response_models import (
     CreditData,
     KBPrice,
@@ -218,6 +218,15 @@ def get_internal_market_data(
     if not cctr_m:
         return result
 
+    # 복도구조 — 선택 평형(평형명세 FRDR_STRC_CTNT) 단위. complexes 에 컬럼 없음(정보계 원천만).
+    corridor_type = None
+    if area_obj and area_obj.kb_area_code:
+        pr = db.query(CctrKbAptPntpI.frdr_strc_ctnt).filter(
+            CctrKbAptPntpI.kb_qtn_rles_gd_cd == complex_obj.kb_complex_id,
+            CctrKbAptPntpI.pntp_seqno == area_obj.kb_area_code,
+        ).first()
+        corridor_type = pr[0] if pr else None
+
     # 단지 기본정보 — CCTR(정보계 원천) 우선, dev 미배선분은 app-schema complexes 폴백.
     result["complex_master"] = {
         "total_households": cctr_m.tot_gen_cnt if cctr_m.tot_gen_cnt is not None else complex_obj.total_households,
@@ -226,6 +235,7 @@ def get_internal_market_data(
         "total_parking": cctr_m.prkn_tcnt if cctr_m.prkn_tcnt is not None else complex_obj.total_parking,
         "built_year": cctr_m.cmcn_ym or complex_obj.built_year,
         "apst_yncd": cctr_m.apst_yncd,  # complexes 에 컬럼 없음 — 정보계 원천에서만
+        "corridor_type": corridor_type,  # 평형명세 복도구조
     }
 
     result["credit_data"] = _build_credit_from_cctr(db, complex_obj.kb_complex_id, area_obj)

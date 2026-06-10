@@ -123,6 +123,8 @@ def main() -> None:
 
         # 평형 — area_id → (KBA, pntp_seqno) 역참조 맵도 시세 적재에 사용.
         # pntp_seqno 는 복합 PK 컬럼 → NULL·단지내 중복 평형코드는 skip(quarantine).
+        # 복도구조는 평형 단위(정보계 FRDR_STRC_CTNT)지만 크롤엔 단지단위(hallway_type)뿐 → 단지값 사용.
+        hallway_of = {c.id: c.hallway_type for c in complexes}
         area_key = {}
         pntp_seen = set()
         skipped_area = 0
@@ -135,6 +137,7 @@ def main() -> None:
             db.add(ik.CctrKbAptPntpI(
                 kb_qtn_rles_gd_cd=kba, pntp_seqno=a.kb_area_code,
                 exuse_are=a.exclusive_m2, pntp_are=a.supply_m2,
+                frdr_strc_ctnt=hallway_of.get(a.complex_id),
             ))
             counts["cctr_kb_apt_pntp_i"] += 1
             area_key[a.id] = (kba, a.kb_area_code)

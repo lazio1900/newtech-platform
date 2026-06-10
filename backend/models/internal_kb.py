@@ -53,6 +53,7 @@ class CctrKbAptPntpI(Base):
     pntp_seqno = Column(String(20), primary_key=True, comment="평형순번 → areas.kb_area_code")
     exuse_are = Column(Float, comment="전용면적㎡ → exclusive_m2 (pyeong 은 적재 시 파생)")
     pntp_are = Column(Float, comment="공급면적㎡ → supply_m2")
+    frdr_strc_ctnt = Column(String(20), comment="복도구조 계단식/복도식/혼합식 (정보계 평형명세) → corridor_type")
 
 
 class CctrKbAptQtnL(Base):

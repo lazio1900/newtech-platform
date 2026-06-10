@@ -314,6 +314,7 @@ def build_complex_prompt(complex_name, scores, master, credit, pyeong) -> str:
 - 최고층: {m.get("max_floor") or "정보없음"}층
 - 연식: {age_txt}
 - 세대당 주차: {per_txt}
+- 복도타입: {m.get("corridor_type") or "-"}
 - 물건유형: {mixed_txt}
 - 평형: {pyeong}평 (전용)
 
