@@ -489,12 +489,13 @@ def perform_full_analysis(
     # 3-4. AI 종합 의견 + 심사역 권고 — 모든 분석 사실 종합 LLM
     overall_opinion = comprehensive_opinion_fallback
     auditor_recommendation = ""
-    if real_data and db is not None and credit_data and not _internal:
+    if real_data and db is not None and credit_data:
         try:
             from services.ai_overall_analysis_service import generate_or_get_cached as gen_overall
             ov = gen_overall(
                 db=db, application_id=application_id,
                 pbi=property_basic_info, scores=location_scores,
+                complex_scores=complex_scores,
                 credit=credit_data, nearby=nearby_trends, ppp=price_per_pyeong,
                 rights=property_rights_info,
                 loan_amount=loan_amount,

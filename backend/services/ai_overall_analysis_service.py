@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from models.loan import LoanApplication
 from models.response_models import (
-    AnalysisData, CreditData, NearbyPropertyTrends, PricePerPyeongTrend,
+    AnalysisData, ComplexScores, CreditData, NearbyPropertyTrends, PricePerPyeongTrend,
     PropertyBasicInfo, PropertyRightsInfo, LocationScores,
 )
 
@@ -67,8 +67,9 @@ def build_prompt(
     loan_amount: int,
     ltv_current: float,
     ltv_jb: float,
+    complex_scores: Optional[ComplexScores] = None,
 ) -> str:
-    # 입지점수
+    # 입지점수 (외부: 주변시설 6축) 또는 단지 특성점수 (내부망: CCTR 5축)
     sc_section = "데이터 없음"
     if scores:
         avg = round((scores.station_walk + scores.commute_time + scores.school_walk
@@ -77,6 +78,14 @@ def build_prompt(
             f"역세권 {scores.station_walk} / 노선 {scores.commute_time} / "
             f"학군 {scores.school_walk} / 단지규모 {scores.units_score} / "
             f"생활 {scores.living_env} / 자연 {scores.nature_env}  (평균 {avg})"
+        )
+    elif complex_scores:
+        cs = complex_scores
+        avg = round((cs.scale + cs.age + cs.parking + cs.price_stability + cs.landmark) / 5)
+        mixed = "주상복합" if cs.is_mixed_use else ("일반아파트" if cs.is_mixed_use is False else "유형미상")
+        sc_section = (
+            f"단지규모 {cs.scale} / 연식 {cs.age} / 주차 {cs.parking} / "
+            f"시세안정성 {cs.price_stability} / 단지위상 {cs.landmark}  (평균 {avg}, {mixed})"
         )
 
     # JB / 예측
@@ -169,6 +178,7 @@ def generate_or_get_cached(
     loan_amount: int,
     ltv_current: float,
     ltv_jb: float,
+    complex_scores: Optional[ComplexScores] = None,
 ) -> dict:
     """반환: {"comprehensive_opinion": str, "auditor_recommendation": str}."""
     fallback = {
@@ -187,6 +197,7 @@ def generate_or_get_cached(
 
     prompt = build_prompt(
         pbi, scores, credit, nearby, ppp, rights, loan_amount, ltv_current, ltv_jb,
+        complex_scores=complex_scores,
     )
 
     try:
