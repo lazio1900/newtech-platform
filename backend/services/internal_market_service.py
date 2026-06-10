@@ -197,7 +197,7 @@ def get_internal_market_data(
     위경도·매물·인근동향은 CCTR_* 에 없어 None(확인 불가). 단지/평형 식별은 app-schema id 유지.
     """
     result = {"complex": None, "area": None, "credit_data": None,
-              "nearby_trends": None, "price_per_pyeong": None}
+              "nearby_trends": None, "price_per_pyeong": None, "complex_master": None}
 
     if complex_id is None:
         return result
@@ -211,11 +211,22 @@ def get_internal_market_data(
         area_obj = db.query(Area).filter(Area.id == area_id, Area.complex_id == complex_obj.id).first()
     result["area"] = area_obj
 
-    # CCTR 에 이 단지가 적재됐는지 — 없으면 시세 확인 불가
-    if not db.query(CctrKbAptM.kb_qtn_rles_gd_cd).filter(
+    # CCTR 단지 마스터 — 없으면 시세 확인 불가. 단지특성 점수용 master 도 여기서 채운다.
+    cctr_m = db.query(CctrKbAptM).filter(
         CctrKbAptM.kb_qtn_rles_gd_cd == complex_obj.kb_complex_id
-    ).first():
+    ).first()
+    if not cctr_m:
         return result
+
+    # 단지 기본정보 — CCTR(정보계 원천) 우선, dev 미배선분은 app-schema complexes 폴백.
+    result["complex_master"] = {
+        "total_households": cctr_m.tot_gen_cnt if cctr_m.tot_gen_cnt is not None else complex_obj.total_households,
+        "total_buildings": cctr_m.tot_dong_cnt if cctr_m.tot_dong_cnt is not None else complex_obj.total_buildings,
+        "max_floor": cctr_m.hscm_hgst_flr if cctr_m.hscm_hgst_flr is not None else complex_obj.max_floor,
+        "total_parking": cctr_m.prkn_tcnt if cctr_m.prkn_tcnt is not None else complex_obj.total_parking,
+        "built_year": cctr_m.cmcn_ym or complex_obj.built_year,
+        "apst_yncd": cctr_m.apst_yncd,  # complexes 에 컬럼 없음 — 정보계 원천에서만
+    }
 
     result["credit_data"] = _build_credit_from_cctr(db, complex_obj.kb_complex_id, area_obj)
     return result

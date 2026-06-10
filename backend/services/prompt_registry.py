@@ -31,8 +31,12 @@ PROMPT_REGISTRY: dict[str, FeatureMeta] = {
         "description": "단지 위치·주변 시설(학군/지하철/병원/공원) 점수 기반 자연어 분석",
         "prompts": {
             "system": {
-                "label": "시스템 프롬프트",
+                "label": "시스템 프롬프트 (외부망/주변시설)",
                 "description": "LLM 역할·출력 형식(JSON)·작성 규칙 정의",
+            },
+            "system_internal": {
+                "label": "시스템 프롬프트 (내부망/단지특성)",
+                "description": "폐쇄망 — 단지 규모·연식·주차·시세 기반 분석 (좌표/시설 없음)",
             },
         },
     },

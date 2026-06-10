@@ -57,6 +57,9 @@ def complex_fields(m: ik.CctrKbAptM, dong_name: str | None) -> dict:
         "region_code": (m.kb_qtn_stdng_cd or "")[:5] or None,
         "built_year": m.cmcn_ym,
         "total_households": m.tot_gen_cnt,
+        "total_buildings": m.tot_dong_cnt,
+        "max_floor": m.hscm_hgst_flr,
+        "total_parking": m.prkn_tcnt,
         "address": _compose_addr(m) or m.apt_nm,
     }
 

@@ -3,11 +3,12 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, Tooltip
 } from 'recharts';
-import type { LocationScores } from '@/types/loan';
+import type { ComplexScores, LocationScores } from '@/types/loan';
 
 interface AIPropertyAnalysisProps {
   analysis: string | null | undefined;
-  locationScores?: LocationScores | null;
+  locationScores?: LocationScores | null;        // 외부 모드 6축
+  complexScores?: ComplexScores | null;          // 내부망 모드 5축
 }
 
 interface RadarDataItem {
@@ -16,12 +17,46 @@ interface RadarDataItem {
   fullMark: number;
 }
 
-export default function AIPropertyAnalysis({ analysis, locationScores }: AIPropertyAnalysisProps) {
+interface TooltipProps {
+  active?: boolean;
+  payload?: Array<{ value: number; payload: { axis: string } }>;
+}
+
+function CustomTooltip({ active, payload }: TooltipProps) {
+  if (active && payload && payload.length) {
+    return (
+      <div style={{
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        border: '1px solid #E0E0E0',
+        borderRadius: '4px',
+        padding: '8px 12px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+      }}>
+        <p style={{ margin: 0, fontSize: '13px', color: '#666' }}>
+          {payload[0].payload.axis}
+        </p>
+        <p style={{ margin: '4px 0 0', fontSize: '15px', fontWeight: 700, color: '#333' }}>
+          {payload[0].value}점
+        </p>
+      </div>
+    );
+  }
+  return null;
+}
+
+export default function AIPropertyAnalysis({ analysis, locationScores, complexScores }: AIPropertyAnalysisProps) {
   const [showDetail, setShowDetail] = useState<boolean>(false);
 
   if (!analysis) return null;
 
-  const radarData: RadarDataItem[] | null = locationScores ? [
+  // 내부망(complexScores) 우선 — 둘 다 없으면 텍스트만.
+  const radarData: RadarDataItem[] | null = complexScores ? [
+    { axis: '단지 규모', value: complexScores.scale, fullMark: 100 },
+    { axis: '연식', value: complexScores.age, fullMark: 100 },
+    { axis: '주차 편의', value: complexScores.parking, fullMark: 100 },
+    { axis: '시세 안정성', value: complexScores.price_stability, fullMark: 100 },
+    { axis: '단지 위상', value: complexScores.landmark, fullMark: 100 },
+  ] : locationScores ? [
     { axis: '역세권', value: locationScores.station_walk, fullMark: 100 },
     { axis: '노선 다양성', value: locationScores.commute_time, fullMark: 100 },
     { axis: '단지 규모', value: locationScores.units_score, fullMark: 100 },
@@ -30,12 +65,13 @@ export default function AIPropertyAnalysis({ analysis, locationScores }: AIPrope
     { axis: '자연환경', value: locationScores.nature_env, fullMark: 100 },
   ] : null;
 
-  const avgScore = locationScores
-    ? Math.round(
-        (locationScores.station_walk + locationScores.commute_time +
-         locationScores.units_score + locationScores.school_walk +
-         locationScores.living_env + locationScores.nature_env) / 6
-      )
+  const avgScore = radarData
+    ? Math.round(radarData.reduce((s, d) => s + d.value, 0) / radarData.length)
+    : null;
+
+  const mixedUseBadge = complexScores
+    ? (complexScores.is_mixed_use === true ? '주상복합'
+      : complexScores.is_mixed_use === false ? '일반 아파트' : null)
     : null;
 
   const getGradeInfo = (score: number) => {
@@ -48,28 +84,6 @@ export default function AIPropertyAnalysis({ analysis, locationScores }: AIPrope
 
   const gradeInfo = avgScore ? getGradeInfo(avgScore) : null;
 
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div style={{
-          backgroundColor: 'rgba(255,255,255,0.95)',
-          border: '1px solid #E0E0E0',
-          borderRadius: '4px',
-          padding: '8px 12px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
-        }}>
-          <p style={{ margin: 0, fontSize: '13px', color: '#666' }}>
-            {payload[0].payload.axis}
-          </p>
-          <p style={{ margin: '4px 0 0', fontSize: '15px', fontWeight: 700, color: '#333' }}>
-            {payload[0].value}점
-          </p>
-        </div>
-      );
-    }
-    return null;
-  };
-
   return (
     <div className="ai-card">
       <div style={{
@@ -78,7 +92,21 @@ export default function AIPropertyAnalysis({ analysis, locationScores }: AIPrope
         alignItems: 'center',
         marginBottom: '16px'
       }}>
-        <h3 style={{ margin: 0 }}>AI 입지 분석 결과</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <h3 style={{ margin: 0 }}>AI 입지 분석 결과</h3>
+          {mixedUseBadge && (
+            <span style={{
+              fontSize: '11px',
+              fontWeight: 600,
+              padding: '2px 8px',
+              borderRadius: '10px',
+              color: mixedUseBadge === '주상복합' ? '#B45309' : '#374151',
+              backgroundColor: mixedUseBadge === '주상복합' ? '#FEF3C7' : '#F3F4F6',
+            }}>
+              {mixedUseBadge}
+            </span>
+          )}
+        </div>
         <button
           onClick={() => setShowDetail(!showDetail)}
           style={{

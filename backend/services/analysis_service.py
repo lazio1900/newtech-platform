@@ -298,6 +298,27 @@ def perform_full_analysis(
         # 내부전용은 facility(좌표 필요) 없어 입지 확인 불가 → None 유지(더미 금지)
         location_scores = generate_location_scores(property_address)
 
+    # 1-1b. 내부망 단지특성 점수: facility 입지 대신 단지 기본정보·시세(CCTR_*) 기반 5축.
+    complex_scores = None
+    if _internal and real_data and real_data.get("complex_master"):
+        try:
+            from services.complex_score_service import compute_complex_scores
+            m = real_data["complex_master"]
+            kb = credit_data.kb_price if credit_data else None
+            complex_scores = compute_complex_scores(
+                total_households=m.get("total_households"),
+                total_buildings=m.get("total_buildings"),
+                max_floor=m.get("max_floor"),
+                built_year=m.get("built_year"),
+                total_parking=m.get("total_parking"),
+                apst_yncd=m.get("apst_yncd"),
+                kb_low=kb.low if kb else None,
+                kb_estimated=kb.estimated if kb else None,
+                kb_high=kb.high if kb else None,
+            )
+        except Exception as e:
+            logger.warning(f"단지특성 점수 산출 실패: {e}")
+
     # 담보 물건 기초 정보: 실 DB 우선, 없으면 더미.
     # location_scores 평균을 단일 location_score 에 주입 (N/A 방지).
     if real_data and real_data.get("complex"):
@@ -309,6 +330,11 @@ def perform_full_analysis(
         )
         if _internal:
             property_basic_info.corridor_type = None  # CCTR_* 에 복도타입 없음 → 확인 불가
+            if complex_scores is not None:
+                property_basic_info.location_score = round(
+                    (complex_scores.scale + complex_scores.age + complex_scores.parking
+                     + complex_scores.price_stability + complex_scores.landmark) / 5
+                )
     elif _internal:
         property_basic_info = PropertyBasicInfo(address=property_address, complex_name=complex_name)
     else:
@@ -401,6 +427,14 @@ def perform_full_analysis(
             return gp(db=local_db, application_id=application_id, complex_obj=co, scores=_scores, pyeong=_py)
         parallel_tasks["property"] = _property
 
+    if _internal and complex_scores is not None and complex_id_for_threads is not None:
+        def _property_internal(local_db, _cs=complex_scores, _py=target_pyeong, _name=target_name,
+                               _m=real_data.get("complex_master"), _credit=credit_data):
+            from services.ai_property_analysis_service import generate_or_get_cached_complex as gpc
+            return gpc(db=local_db, application_id=application_id,
+                       complex_name=_name, scores=_cs, master=_m, credit=_credit, pyeong=_py)
+        parallel_tasks["property"] = _property_internal
+
     if real_data and real_data.get("credit_data") and not _internal:
         # internal_only 는 AI 시세 내러티브 캐시(앱별, mode 미구분)를 안 탐 → fallback 텍스트 사용
         def _market(local_db, _credit=credit_data, _nb=nearby_trends, _amt=loan_amount, _tp=total_prior, _py=target_pyeong, _ir=interest_rate):
@@ -440,10 +474,16 @@ def perform_full_analysis(
         nearby_analysis_text = results.get("nearby")
 
     if not property_analysis_text:
-        property_analysis_text = (
-            f"[입지 분석] {property_address} 단지에 대해 현재 자동 분석 결과를 생성할 수 없습니다. "
-            "단지 좌표와 주변 시설 데이터(학군/지하철/병원/공원)가 수집된 후 다시 시도해주세요."
-        )
+        if _internal:
+            property_analysis_text = (
+                "[단지·입지 분석] 내부 데이터(CCTR_*)에 이 단지의 기준정보·시세가 없어 "
+                "분석을 생성할 수 없습니다. 부동산고유번호 조회·적재 선행이 필요합니다."
+            )
+        else:
+            property_analysis_text = (
+                f"[입지 분석] {property_address} 단지에 대해 현재 자동 분석 결과를 생성할 수 없습니다. "
+                "단지 좌표와 주변 시설 데이터(학군/지하철/병원/공원)가 수집된 후 다시 시도해주세요."
+            )
 
     # 3-4. AI 종합 의견 + 심사역 권고 — 모든 분석 사실 종합 LLM
     overall_opinion = comprehensive_opinion_fallback
@@ -473,6 +513,7 @@ def perform_full_analysis(
         nearby_analysis=nearby_analysis_text,
 
         location_scores=location_scores,
+        complex_scores=complex_scores,
 
         rights_analysis=RightsAnalysisDetail(
             gap_summary=rights_llm.get("gap_summary") or "등기부 갑구 확인 결과 현 소유자의 단독소유로 확인되며, 소유권 이전 이력은 정상적입니다. 가압류, 가처분 등 소유권 제한 사항은 존재하지 않습니다.",

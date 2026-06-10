@@ -98,6 +98,8 @@ def main() -> None:
                 kb_qtn_rles_gd_cd=c.kb_complex_id, apt_nm=c.name,
                 road_nm_bsic_addr=c.road_address, kb_qtn_stdng_cd=c.dong_code,
                 cmcn_ym=_cmcn_ym(c.built_year), tot_gen_cnt=c.total_households,
+                tot_dong_cnt=c.total_buildings, hscm_hgst_flr=c.max_floor,
+                prkn_tcnt=c.total_parking,  # apst_yncd: 크롤 원천 없음 → 정보계(OCTR)에서만 채워짐
                 stad_ctnt=c.address,
             ))
             counts["cctr_kb_apt_m"] += 1

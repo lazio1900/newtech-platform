@@ -149,13 +149,23 @@ class CreditData(BaseModel):
 
 
 class LocationScores(BaseModel):
-    """입지 분석 레이더 차트 점수"""
+    """입지 분석 레이더 차트 점수 — 외부(크롤) 모드: 주변시설·좌표 기반"""
     station_walk: int       # 인접 역까지 도보 소요 시간 점수 (0~100)
     commute_time: int       # 주요 업무지구 평균 소요 시간 점수 (0~100)
     school_walk: int        # 인접 초등학교까지 도보 소요 시간 점수 (0~100)
     units_score: int        # 세대 수 점수 (0~100)
     living_env: int         # 생활환경 점수 (0~100)
     nature_env: int         # 자연환경 점수 (0~100)
+
+
+class ComplexScores(BaseModel):
+    """단지·물건 특성 점수 — 내부망(CCTR_*) 모드: 좌표·주변시설 없는 폐쇄망용 레이더"""
+    scale: int              # 단지 규모 (세대수+동수)
+    age: int                # 연식 (준공 경과년수)
+    parking: int            # 주차 편의 (세대당 주차대수)
+    price_stability: int    # 시세 안정성 (매매 하한~상한 스프레드)
+    landmark: int           # 단지 위상 (최고층+동수)
+    is_mixed_use: Optional[bool] = None  # 주상복합 여부 (APST_YNCD) — 점수축 아닌 물건유형 배지
 
 
 class AIAnalysis(BaseModel):
@@ -166,7 +176,8 @@ class AIAnalysis(BaseModel):
     nearby_analysis: Optional[str] = None
     comprehensive_opinion: Optional[str] = None
     auditor_recommendation: Optional[str] = None  # 심사역 권고 의견 초안
-    location_scores: Optional[LocationScores] = None
+    location_scores: Optional[LocationScores] = None       # 외부 모드 레이더 (주변시설)
+    complex_scores: Optional[ComplexScores] = None         # 내부망 모드 레이더 (단지·시세 특성)
 
 
 class SimilarProperty(BaseModel):

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from models.complex import Complex
 from models.facility import ComplexFacility
 from models.loan import LoanApplication
-from models.response_models import LocationScores
+from models.response_models import ComplexScores, LocationScores
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +156,26 @@ def _fallback_text(scores: LocationScores) -> str:
     )
 
 
+def _flatten(val) -> str:
+    """LLM JSON 값(문자열/리스트/딕셔너리)을 평문으로 조합."""
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val.strip()
+    if isinstance(val, list):
+        return " ".join(_flatten(v) for v in val)
+    if isinstance(val, dict):
+        return " ".join(f"{k}: {_flatten(v)}" for k, v in val.items())
+    return str(val).strip()
+
+
+def _assemble(parsed: dict, sections: list) -> str:
+    """(label, key) 순서대로 파싱 결과를 평문 텍스트로 조합."""
+    parts = [f"{label}\n{_flatten(parsed.get(key))}"
+             for label, key in sections if _flatten(parsed.get(key))]
+    return "\n\n".join(parts)
+
+
 def generate_or_get_cached(
     db: Session,
     application_id: Optional[str],
@@ -205,28 +225,15 @@ def generate_or_get_cached(
             return _fallback_text(scores)
 
         # 7개 라벨 순서대로 평면 텍스트 조합
-        def _flatten(val) -> str:
-            if val is None:
-                return ""
-            if isinstance(val, str):
-                return val.strip()
-            if isinstance(val, list):
-                return " ".join(_flatten(v) for v in val)
-            if isinstance(val, dict):
-                return " ".join(f"{k}: {_flatten(v)}" for k, v in val.items())
-            return str(val).strip()
-
-        sections = [
-            ("[역세권]", parsed.get("역세권")),
-            ("[노선 다양성]", parsed.get("노선_다양성")),
-            ("[단지 규모]", parsed.get("단지_규모")),
-            ("[학군]", parsed.get("학군")),
-            ("[생활환경]", parsed.get("생활환경")),
-            ("[자연환경]", parsed.get("자연환경")),
-            ("[종합 의견]", parsed.get("종합_의견")),
-        ]
-        parts = [f"{label}\n{_flatten(body)}" for label, body in sections if _flatten(body)]
-        text = "\n\n".join(parts)
+        text = _assemble(parsed, [
+            ("[역세권]", "역세권"),
+            ("[노선 다양성]", "노선_다양성"),
+            ("[단지 규모]", "단지_규모"),
+            ("[학군]", "학군"),
+            ("[생활환경]", "생활환경"),
+            ("[자연환경]", "자연환경"),
+            ("[종합 의견]", "종합_의견"),
+        ])
         if not text:
             return _fallback_text(scores)
 
@@ -242,3 +249,145 @@ def generate_or_get_cached(
     except Exception as e:
         logger.warning(f"[ai_analysis] LLM call failed: {e}")
         return _fallback_text(scores)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 내부망(CCTR_*) 모드 — 좌표/주변시설 없이 단지·시세 특성으로 분석
+# ─────────────────────────────────────────────────────────────────────────────
+
+COMPLEX_SYSTEM_PROMPT = """당신은 한국 부동산 담보 평가 전문가입니다.
+폐쇄망 내부 데이터(단지 기본정보 + KB 시세)만으로 담보 물건의 단지 특성을 분석합니다.
+주변 시설·좌표 데이터는 제공되지 않으므로 역세권·학군·교통·생활환경은 언급하지 않습니다.
+
+JSON 키와 각 항목 작성 가이드:
+- "단지_규모": 세대수와 동수로 본 규모·환금성.
+- "연식": 준공 경과년수 기준 노후도.
+- "주차": 세대당 주차대수 기준 편의.
+- "시세_안정성": 매매 하한~상한 스프레드로 본 가격 안정성(담보 평가 신뢰도).
+- "단지_위상": 최고층·동수로 본 단지 위상.
+- "종합_의견": 위 항목과 평균 점수, 주상복합 여부를 토대로 담보 적합성 종합.
+
+작성 규칙:
+- 각 값은 2~3문장의 한국어 존대형(~합니다) 평문. 마크다운/번호 금지.
+- 제공된 수치(세대수/동수/층/주차/점수/시세)만 사용. 임의 수치·주변환경 추측 금지."""
+
+
+def _complex_avg(scores: ComplexScores) -> int:
+    return round((scores.scale + scores.age + scores.parking
+                  + scores.price_stability + scores.landmark) / 5)
+
+
+def _won_eok(v: Optional[int]) -> str:
+    return f"{v / 1e8:.1f}억" if v else "확인 불가"
+
+
+def _fallback_complex(scores: ComplexScores) -> str:
+    return (
+        f"[종합 의견] AI 자동 분석 일시 사용 불가. 산출된 단지 특성 점수 평균 "
+        f"{_complex_avg(scores)}점을 참고하시기 바랍니다."
+    )
+
+
+def build_complex_prompt(complex_name, scores, master, credit, pyeong) -> str:
+    from services.complex_score_service import _year_int
+
+    m = master or {}
+    units = m.get("total_households")
+    parking = m.get("total_parking")
+    by = _year_int(m.get("built_year"))
+    age_txt = f"{datetime.now().year - by}년 (준공 {by}년)" if by else "정보없음"
+    per_txt = f"{parking / units:.2f}대/세대" if parking and units else "정보없음"
+    mixed = scores.is_mixed_use
+    mixed_txt = "주상복합" if mixed else ("일반 아파트" if mixed is False else "미상")
+    kb = credit.kb_price if credit else None
+    price_txt = (
+        f"하한 {_won_eok(kb.low)} / 일반 {_won_eok(kb.estimated)} / 상한 {_won_eok(kb.high)}"
+        if kb else "확인 불가"
+    )
+
+    return f"""다음 단지의 담보 특성 분석을 작성하세요.
+
+[단지 기본]
+- 단지명: {complex_name or "-"}
+- 세대수: {units or "정보없음"}세대
+- 총 동수: {m.get("total_buildings") or "정보없음"}동
+- 최고층: {m.get("max_floor") or "정보없음"}층
+- 연식: {age_txt}
+- 세대당 주차: {per_txt}
+- 물건유형: {mixed_txt}
+- 평형: {pyeong}평 (전용)
+
+[KB 시세]
+{price_txt}
+
+[단지 특성점수 — 0~100]
+- 단지 규모: {scores.scale}
+- 연식: {scores.age}
+- 주차 편의: {scores.parking}
+- 시세 안정성: {scores.price_stability}
+- 단지 위상: {scores.landmark}
+- 평균: {_complex_avg(scores)}점
+
+위 사실만 사용해 다음 6개 키를 모두 포함한 JSON 객체로 응답하세요. 키 이름은 정확히 그대로:
+{{"단지_규모": "...", "연식": "...", "주차": "...", "시세_안정성": "...", "단지_위상": "...", "종합_의견": "..."}}
+"""
+
+
+def generate_or_get_cached_complex(
+    db: Session,
+    application_id: Optional[str],
+    *,
+    complex_name: Optional[str],
+    scores: ComplexScores,
+    master: Optional[dict],
+    credit,
+    pyeong: Optional[int] = None,
+) -> str:
+    """내부망 단지특성 분석 — 캐시 우선(ai_analysis_text), 없으면 OpenAI 호출. 실패 시 fallback."""
+    app = None
+    if application_id:
+        app = db.query(LoanApplication).filter(LoanApplication.id == application_id).first()
+        if app and app.ai_analysis_text:
+            logger.info(f"[ai_analysis] cache hit (complex) for application {application_id}")
+            return app.ai_analysis_text
+
+    prompt = build_complex_prompt(complex_name, scores, master, credit, pyeong)
+    try:
+        from services.llm_service import LLMClient
+        from services.prompt_registry import get_prompt
+
+        client = LLMClient()
+        system_prompt = get_prompt(db, "property", "system_internal", COMPLEX_SYSTEM_PROMPT)
+        result = client.complete(prompt, system=system_prompt, json_mode=True)
+        raw = (result.get("text") or "").strip()
+        if not raw:
+            return _fallback_complex(scores)
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as e:
+            logger.warning(f"[ai_analysis] complex JSON parse failed: {e}; raw[:200]={raw[:200]}")
+            return _fallback_complex(scores)
+
+        text = _assemble(parsed, [
+            ("[단지 규모]", "단지_규모"),
+            ("[연식]", "연식"),
+            ("[주차]", "주차"),
+            ("[시세 안정성]", "시세_안정성"),
+            ("[단지 위상]", "단지_위상"),
+            ("[종합 의견]", "종합_의견"),
+        ])
+        if not text:
+            return _fallback_complex(scores)
+
+        if app:
+            app.ai_analysis_text = text
+            app.ai_analysis_generated_at = datetime.utcnow()
+            db.commit()
+            logger.info(
+                f"[ai_analysis] complex generated and cached for application {application_id} "
+                f"(tokens: in={result.get('prompt_tokens')}, out={result.get('completion_tokens')})"
+            )
+        return text
+    except Exception as e:
+        logger.warning(f"[ai_analysis] complex LLM call failed: {e}")
+        return _fallback_complex(scores)

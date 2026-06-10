@@ -254,6 +254,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
         <AIPropertyAnalysis
           analysis={data.ai_analysis.property_analysis}
           locationScores={data.ai_analysis.location_scores}
+          complexScores={data.ai_analysis.complex_scores}
         />
       </div>
 
@@ -418,6 +419,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
         const naver = data.credit_data?.naver_listings ?? { avg_asking: null, listing_count: 0, trend: '-', history: [] };
         const jbFair = data.credit_data?.jb_fair_price ?? kb.low;
         const ls = data.ai_analysis.location_scores;
+        const cs = data.ai_analysis.complex_scores;
         const totalPrior = (ri.max_bond_amount || 0) + (ri.tenant_deposit || 0) + loanAmount;
         const ltvCurrent = kb.estimated > 0 ? (totalPrior / kb.estimated * 100).toFixed(1) : '-';
         const ltvJB = jbFair > 0 ? (totalPrior / jbFair * 100).toFixed(1) : '-';
@@ -624,8 +626,32 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   </table>
                 </div>
 
-                {/* 7. 입지 분석 점수 */}
-                {ls && (
+                {/* 7. 입지 분석 점수 — 내부망(cs) 5축 우선, 외부(ls) 6축 */}
+                {cs ? (
+                <div className="report-section">
+                  <h4>7. AI 단지·입지 분석 점수{cs.is_mixed_use ? ' (주상복합)' : ''}</h4>
+                  <table className="report-table score-table">
+                    <thead>
+                      <tr>
+                        <th>단지 규모</th>
+                        <th>연식</th>
+                        <th>주차 편의</th>
+                        <th>시세 안정성</th>
+                        <th>단지 위상</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>{cs.scale}점</td>
+                        <td>{cs.age}점</td>
+                        <td>{cs.parking}점</td>
+                        <td>{cs.price_stability}점</td>
+                        <td>{cs.landmark}점</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                ) : ls && (
                 <div className="report-section">
                   <h4>7. AI 입지 분석 점수</h4>
                   <table className="report-table score-table">

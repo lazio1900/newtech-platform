@@ -207,7 +207,7 @@ export interface CreditDataWithHistory {
   jb_detail?: JBFairPriceDetail | null;
 }
 
-// 입지 분석 점수
+// 입지 분석 점수 (외부 모드 — 주변시설·좌표 기반 6축)
 export interface LocationScores {
   station_walk: number;
   commute_time: number;
@@ -215,6 +215,16 @@ export interface LocationScores {
   school_walk: number;
   living_env: number;
   nature_env: number;
+}
+
+// 단지·물건 특성 점수 (내부망 CCTR_* 모드 — 좌표/시설 없는 폐쇄망용 5축)
+export interface ComplexScores {
+  scale: number;            // 단지 규모 (세대수+동수)
+  age: number;              // 연식 (준공 경과)
+  parking: number;          // 주차 편의 (세대당 주차대수)
+  price_stability: number;  // 시세 안정성 (매매 하한~상한 스프레드)
+  landmark: number;         // 단지 위상 (최고층+동수)
+  is_mixed_use?: boolean | null;  // 주상복합 여부 — 점수축 아닌 물건유형 배지
 }
 
 // AI 분석 결과
@@ -225,7 +235,8 @@ export interface AiAnalysis {
   nearby_analysis?: string | null;
   comprehensive_opinion: string;
   auditor_recommendation?: string | null;
-  location_scores?: LocationScores;
+  location_scores?: LocationScores | null;
+  complex_scores?: ComplexScores | null;
 }
 
 // 유사 물건
