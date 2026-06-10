@@ -30,7 +30,7 @@ export default function LoginPage({ onLogin, onGoRegister }: LoginPageProps) {
       } else {
         setError(data.message || '로그인에 실패했습니다.');
       }
-    } catch (err) {
+    } catch {
       setError('서버에 연결할 수 없습니다.');
     } finally {
       setLoading(false);
@@ -85,7 +85,7 @@ export default function LoginPage({ onLogin, onGoRegister }: LoginPageProps) {
           </button>
 
           <div className="login-footer">
-            <span>대부업체 계정이 없으신가요?</span>
+            <span>계정이 없으신가요?</span>
             <button className="register-link" onClick={onGoRegister}>
               회원가입
             </button>
