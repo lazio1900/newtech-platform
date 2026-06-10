@@ -216,7 +216,8 @@ def _build_ppp_from_cctr(
             .filter(scope_filter, Complex.kb_complex_id.isnot(None)).all()
         ]
 
-    def _ppp(kbs: list[str]) -> dict[str, int]:
+    def _ppp(kbs: list[str], window: int = 1) -> dict[str, int]:
+        """월별 평단가(만원/평). window>1 이면 표본 적은 행정구역 평균을 N개월 이동집계로 평활."""
         if not kbs:
             return {}
         rows = [
@@ -231,22 +232,25 @@ def _build_ppp_from_cctr(
         for r in rows:
             ym = f"{r.tx_dt[:4]}-{r.tx_dt[4:6]}"
             by_cm.setdefault((ym, r.kb_qtn_rles_gd_cd), []).append(_won(r.tx_amt) / r.apt_are)
+        # 단지-월 평단가(만원/평) — 단지 내부 거래 IQR 후 평균
         month_complex: dict[str, list[float]] = {}
         for (ym, _kb), vals in by_cm.items():
             kept = _iqr_filter(vals)
             if kept:
-                month_complex.setdefault(ym, []).append(sum(kept) / len(kept))
+                month_complex.setdefault(ym, []).append(sum(kept) / len(kept) * 3.305785 / 10000)
+        # 출력 — 최근 window 개월 단지-평단가 풀에 월 IQR 평균. 표본 적은 달의 스파이크 억제.
         out: dict[str, int] = {}
-        for ym, avgs in month_complex.items():
-            kept = _iqr_filter(avgs)
+        for i, ym in enumerate(keys):
+            pool = [v for m in keys[max(0, i - window + 1): i + 1] for v in month_complex.get(m, [])]
+            kept = _iqr_filter(pool)
             if kept:
-                out[ym] = int(sum(kept) / len(kept) * 3.305785 / 10000)
+                out[ym] = int(sum(kept) / len(kept))
         return out
 
-    complex_d = _ppp([target_complex.kb_complex_id]) if target_complex.kb_complex_id else {}
-    dong_d = _ppp(_kb_ids(Complex.dong_code == target_complex.dong_code)) if target_complex.dong_code else {}
+    complex_d = _ppp([target_complex.kb_complex_id], window=1) if target_complex.kb_complex_id else {}
+    dong_d = _ppp(_kb_ids(Complex.dong_code == target_complex.dong_code), window=3) if target_complex.dong_code else {}
     sigungu_d = (
-        _ppp(_kb_ids(Complex.region_code.like(f"{target_complex.region_code[:5]}%")))
+        _ppp(_kb_ids(Complex.region_code.like(f"{target_complex.region_code[:5]}%")), window=3)
         if target_complex.region_code else {}
     )
 
