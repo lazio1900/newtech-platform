@@ -753,6 +753,11 @@ export default function DirectAnalysisForm({
                      placeholder="800000000" disabled={submitting} />
               <span className="daf-unit">원</span>
             </div>
+            {amount && Number(amount) > 0 && (
+              <div className="daf-amount-eok">
+                = {(Number(amount) / 1e8).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}억원
+              </div>
+            )}
           </div>
           <div>
             <label>금리</label>

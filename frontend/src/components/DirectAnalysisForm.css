@@ -155,6 +155,13 @@
 .daf-amount input { flex: 1; }
 .daf-unit { color: #6B7785; font-size: 13px; }
 
+.daf-amount-eok {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #006FBD;
+}
+
 .daf-submit-btn {
   align-self: flex-end;
   padding: 12px 32px;
