@@ -59,7 +59,6 @@ export default function NearbyPropertyList({ data }: NearbyPropertyListProps) {
             <tr>
               <th style={{ width: 40 }}>#</th>
               <th>단지명</th>
-              <th>거리</th>
               <th>평형</th>
               <th>년식</th>
               <th>세대수</th>
@@ -85,7 +84,6 @@ export default function NearbyPropertyList({ data }: NearbyPropertyListProps) {
                   <div style={{ fontWeight: 600 }}>{prop.name}</div>
                   <div style={{ fontSize: 10, color: '#888' }}>{prop.sigungu}</div>
                 </td>
-                <td className="center">{fmtDist(prop.distance_m)}</td>
                 <td className="center">
                   {prop.area}평
                   {prop.exclusive_m2 ? <div style={{ fontSize: 10, color: '#888' }}>{prop.exclusive_m2.toFixed(1)}㎡</div> : null}
