@@ -162,17 +162,16 @@ def _landmark_score(max_floor: Optional[int], total_buildings: Optional[int]) ->
 
 
 def _interpret_mixed_use(apst_yncd) -> Optional[bool]:
-    """APST_YNCD(주상복합여부코드) → bool. ★코드체계 미확정 — 실 정보계 값 확인 후 매핑 보정 필요.
-    현재: 명확한 양/음성만 판정, 그 외는 None(미상)."""
+    """APST_YNCD(주상복합여부코드) → bool. 'YNCD'(여부코드)이므로 Y/N·1/0 계열로 판정.
+    명확한 값만 판정하고 미지의 코드는 None(미상) — 거꾸로 표시되느니 미표시(오판 방지).
+    실 정보계 코드가 '01'/'02' 계열이면 아래 집합에 추가."""
     if apst_yncd is None:
         return None
     s = str(apst_yncd).strip().upper()
-    if s in ("", "0", "00", "N", "01"):
+    if s in ("Y", "1", "T", "주상복합") or "주상" in s:
+        return True
+    if s in ("N", "0", "00", "F"):
         return False
-    if s in ("1", "Y", "02", "T"):
-        return True
-    if "주상" in s:
-        return True
     return None
 
 
