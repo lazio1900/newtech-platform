@@ -83,17 +83,24 @@ def build_internal_nearby(
             .all()
         )
 
-    scope = None
-    cands: List[Complex] = []
+    dong_cands: List[Complex] = []
     if target_complex.dong_code:
-        cands = _in_scope(Complex.dong_code == target_complex.dong_code)
+        dong_cands = _in_scope(Complex.dong_code == target_complex.dong_code)
+
+    if len(dong_cands) >= max_count or not target_complex.region_code:
+        cands = dong_cands
         scope = f"법정동 {target_complex.dong_name or target_complex.dong_code}"
-    if len(cands) < max_count and target_complex.region_code:
+    else:
+        # 동 후보 부족 → 시군구로 확장. 라벨도 실제 검색범위(시군구)로 정직하게.
         sigungu = target_complex.region_code[:5]
-        seen = {c.id for c in cands}
-        cands += [c for c in _in_scope(Complex.region_code.like(f"{sigungu}%")) if c.id not in seen]
-        if len(cands) > len(seen):
-            scope = f"시군구 {target_complex.dong_name.split()[0] if target_complex.dong_name else sigungu}" if not seen else scope
+        seen = {c.id for c in dong_cands}
+        expanded = [c for c in _in_scope(Complex.region_code.like(f"{sigungu}%")) if c.id not in seen]
+        cands = dong_cands + expanded
+        if expanded:
+            addr = (target_complex.address or "").split()
+            scope = f"시군구 {addr[1] if len(addr) > 1 else sigungu}"
+        else:
+            scope = f"법정동 {target_complex.dong_name or target_complex.dong_code}"
     if not cands:
         return None
 
