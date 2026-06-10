@@ -435,8 +435,9 @@ def perform_full_analysis(
                        complex_name=_name, scores=_cs, master=_m, credit=_credit, pyeong=_py)
         parallel_tasks["property"] = _property_internal
 
-    if real_data and real_data.get("credit_data") and not _internal:
-        # internal_only 는 AI 시세 내러티브 캐시(앱별, mode 미구분)를 안 탐 → fallback 텍스트 사용
+    if real_data and real_data.get("credit_data"):
+        # internal 도 CCTR 기반 credit_data(KB+실거래+JB) 로 시세 내러티브 생성. 호가·인근은
+        # 내부형식에 없어 프롬프트에 '-'/빈값 → LLM 이 해당 항목 '확인 불가'로 서술.
         def _market(local_db, _credit=credit_data, _nb=nearby_trends, _amt=loan_amount, _tp=total_prior, _py=target_pyeong, _ir=interest_rate):
             from services.ai_market_analysis_service import generate_or_get_cached as gm
             return gm(db=local_db, application_id=application_id,
