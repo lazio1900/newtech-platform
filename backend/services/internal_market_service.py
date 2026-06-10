@@ -24,8 +24,10 @@ from models.response_models import (
     MOLITTransactions,
     NaverListings,
     PricePoint,
+    PricePerPyeongPoint,
+    PricePerPyeongTrend,
 )
-from services.real_data_service import HISTORY_DAYS, _calculate_trend
+from services.real_data_service import HISTORY_DAYS, _calculate_trend, _iqr_filter
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +189,95 @@ def _build_credit_from_cctr(db: Session, kb: str, area_obj: Optional[Area]) -> O
     )
 
 
+def _build_ppp_from_cctr(
+    db: Session, target_complex: Complex, area_obj: Optional[Area]
+) -> Optional[PricePerPyeongTrend]:
+    """단지/읍면동/시군구 평단가 추이 — CCTR 실거래(CctrAptTxcsHist) 12개월 월별.
+
+    외부 로직과 동일: 같은 평형대역(±5㎡) 한정, (월·단지) IQR → 월 IQR 2단계, 결측 carry-forward.
+    행정구역 scope 는 Complex.dong_code/region_code → kb_complex_id 집합으로 CCTR 실거래 조회.
+    """
+    if not area_obj or not area_obj.exclusive_m2:
+        return None
+    m2_lo, m2_hi = area_obj.exclusive_m2 - 5.0, area_obj.exclusive_m2 + 5.0
+
+    today = date.today()
+    keys: list[str] = []
+    cursor = today.replace(day=1)
+    for _ in range(12):
+        keys.append(cursor.strftime("%Y-%m"))
+        cursor = (cursor - timedelta(days=1)).replace(day=1)
+    keys.reverse()
+    start = date(int(keys[0][:4]), int(keys[0][5:7]), 1)
+
+    def _kb_ids(scope_filter) -> list[str]:
+        return [
+            r[0] for r in db.query(Complex.kb_complex_id)
+            .filter(scope_filter, Complex.kb_complex_id.isnot(None)).all()
+        ]
+
+    def _ppp(kbs: list[str]) -> dict[str, int]:
+        if not kbs:
+            return {}
+        rows = [
+            r for r in db.query(CctrAptTxcsHist).filter(
+                CctrAptTxcsHist.kb_qtn_rles_gd_cd.in_(kbs),
+                CctrAptTxcsHist.apt_are.isnot(None),
+                CctrAptTxcsHist.tx_amt.isnot(None),
+            ).all()
+            if r.apt_are and m2_lo <= r.apt_are <= m2_hi and _ymd(r.tx_dt) and _ymd(r.tx_dt) >= start
+        ]
+        by_cm: dict[tuple[str, str], list[float]] = {}
+        for r in rows:
+            ym = f"{r.tx_dt[:4]}-{r.tx_dt[4:6]}"
+            by_cm.setdefault((ym, r.kb_qtn_rles_gd_cd), []).append(_won(r.tx_amt) / r.apt_are)
+        month_complex: dict[str, list[float]] = {}
+        for (ym, _kb), vals in by_cm.items():
+            kept = _iqr_filter(vals)
+            if kept:
+                month_complex.setdefault(ym, []).append(sum(kept) / len(kept))
+        out: dict[str, int] = {}
+        for ym, avgs in month_complex.items():
+            kept = _iqr_filter(avgs)
+            if kept:
+                out[ym] = int(sum(kept) / len(kept) * 3.305785 / 10000)
+        return out
+
+    complex_d = _ppp([target_complex.kb_complex_id]) if target_complex.kb_complex_id else {}
+    dong_d = _ppp(_kb_ids(Complex.dong_code == target_complex.dong_code)) if target_complex.dong_code else {}
+    sigungu_d = (
+        _ppp(_kb_ids(Complex.region_code.like(f"{target_complex.region_code[:5]}%")))
+        if target_complex.region_code else {}
+    )
+
+    def _carry(d: dict[str, int]) -> dict[str, int]:
+        out, last = {}, 0
+        for k in keys:
+            if k in d:
+                last = d[k]
+            out[k] = last
+        return out
+
+    cf, df, sf = _carry(complex_d), _carry(dong_d), _carry(sigungu_d)
+    points: list[PricePerPyeongPoint] = []
+    for ym in keys:
+        c, dn, s = cf[ym], df[ym], sf[ym]
+        c = c or dn or s
+        dn = dn or s or c
+        s = s or dn or c
+        points.append(PricePerPyeongPoint(date=ym, complex=c, dong=dn, sigungu=s))
+
+    if all(p.complex == 0 and p.dong == 0 and p.sigungu == 0 for p in points):
+        return None
+    addr = (target_complex.address or "").split()
+    return PricePerPyeongTrend(
+        complex_name=target_complex.name,
+        dong_name=target_complex.dong_name or (addr[2] if len(addr) > 2 else "동"),
+        sigungu_name=addr[1] if len(addr) > 1 else "구",
+        data=points,
+    )
+
+
 def get_internal_market_data(
     db: Session,
     complex_id: Optional[int] = None,
@@ -243,4 +334,7 @@ def get_internal_market_data(
     # 유사 단지 비교 — 법정동/시군구 + 평형/연식/규모/시세 (좌표 없음)
     from services.internal_nearby_service import build_internal_nearby
     result["nearby_trends"] = build_internal_nearby(db, complex_obj, area_obj)
+
+    # 평단가 추이 — CCTR 실거래 기반 단지/동/시군구 12개월
+    result["price_per_pyeong"] = _build_ppp_from_cctr(db, complex_obj, area_obj)
     return result
