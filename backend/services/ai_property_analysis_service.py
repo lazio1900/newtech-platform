@@ -278,7 +278,7 @@ def _complex_avg(scores: ComplexScores) -> int:
 
 
 def _won_eok(v: Optional[int]) -> str:
-    return f"{v / 1e8:.1f}억" if v else "확인 불가"
+    return f"{v / 1e8:.1f}억" if v and v > 0 else "확인 불가"
 
 
 def _fallback_complex(scores: ComplexScores) -> str:

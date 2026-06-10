@@ -15,8 +15,17 @@ from models.response_models import ComplexScores
 
 
 def _year_int(built_year) -> Optional[int]:
+    """준공연도 파싱 — 정상 형식(YYYY / YYYYMM)만. 오염값(YYYYMMDD·잘못된 월·미래연도)은 None."""
     digits = "".join(c for c in str(built_year or "") if c.isdigit())
-    return int(digits[:4]) if len(digits) >= 4 else None
+    if len(digits) == 4:
+        year, month = int(digits), 1
+    elif len(digits) == 6:
+        year, month = int(digits[:4]), int(digits[4:6])
+    else:
+        return None
+    if 1900 <= year <= date.today().year and 1 <= month <= 12:
+        return year
+    return None
 
 
 def _units_pt(total_households: Optional[int]) -> int:
@@ -107,7 +116,7 @@ def _parking_score(total_parking: Optional[int], total_households: Optional[int]
 
 def _price_stability_score(low: Optional[int], est: Optional[int], high: Optional[int]) -> int:
     """시세 안정성 — 매매 하한~상한 스프레드(/일반거래가). 좁을수록 가격대 명확 = 담보평가 신뢰↑."""
-    if not est or est <= 0 or low is None or high is None or high < low:
+    if not est or est <= 0 or low is None or high is None or high < low or low < 0:
         return 50
     spread = (high - low) / est
     if spread <= 0.05:
@@ -146,7 +155,7 @@ def _landmark_score(max_floor: Optional[int], total_buildings: Optional[int]) ->
     if fp is None and dp is None:
         return 50
     if fp is None:
-        return dp  # type: ignore[return-value]
+        return dp if dp is not None else 50
     if dp is None:
         return fp
     return round(fp * 0.7 + dp * 0.3)
