@@ -239,4 +239,8 @@ def get_internal_market_data(
     }
 
     result["credit_data"] = _build_credit_from_cctr(db, complex_obj.kb_complex_id, area_obj)
+
+    # 유사 단지 비교 — 법정동/시군구 + 평형/연식/규모/시세 (좌표 없음)
+    from services.internal_nearby_service import build_internal_nearby
+    result["nearby_trends"] = build_internal_nearby(db, complex_obj, area_obj)
     return result

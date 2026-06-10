@@ -75,8 +75,9 @@ def build_prompt(
 ) -> str:
     nearby_lines = []
     for s in nearby.similar_properties[:5]:
+        dist = f"거리 {s.distance_m}m / " if s.distance_m is not None else ""
         nearby_lines.append(
-            f"  * {s.name} / 거리 {s.distance_m}m / {s.area}평 / {s.units}세대 / {s.age}년 / "
+            f"  * {s.name} / {dist}{s.area}평 / {s.units}세대 / {s.age}년 / "
             f"최근가 {_format_won(s.recent_price)} / 기준대비 {(s.price_diff_pct or 0):+.1f}% / "
             f"3M변동 {(s.price_change_rate or 0)*100:+.1f}% / 유사도 {(s.similarity or 0)*100:.0f}"
         )
@@ -115,7 +116,7 @@ def build_prompt(
 {chr(10).join(target_lines)}
 
 [인근 유사 단지 — {len(nearby.similar_properties)}건]
-- 검색 반경: {nearby.radius_m or 0}m
+- 비교 범위: {nearby.scope or (f"{nearby.radius_m}m 반경" if nearby.radius_m else "행정구역")}
 - 인근 평균 3개월 변동률: {(nearby.avg_change_rate or 0)*100:+.1f}%
 {chr(10).join(nearby_lines)}
 

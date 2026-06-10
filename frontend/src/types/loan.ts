@@ -249,8 +249,8 @@ export interface SimilarProperty {
   age: number;
   area: number;
   exclusive_m2?: number | null;
-  lat: number;
-  lng: number;
+  lat?: number | null;        // 내부망(CCTR)은 좌표 없음
+  lng?: number | null;
   distance_m?: number | null;
   similarity?: number | null;
   recent_price: number;
@@ -260,10 +260,11 @@ export interface SimilarProperty {
 
 // 인근 유사 물건 동향
 export interface NearbyPropertyTrends {
-  target_lat: number;
-  target_lng: number;
+  target_lat?: number | null;  // 내부망은 null(지도 비표시)
+  target_lng?: number | null;
   target_recent_price?: number | null;
   radius_m?: number | null;
+  scope?: string | null;       // 내부망 비교 범위 (예: "법정동 무악동")
   avg_change_rate?: number | null;
   similar_properties: SimilarProperty[];
 }

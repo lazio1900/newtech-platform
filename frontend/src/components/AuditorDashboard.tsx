@@ -279,10 +279,12 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
       <h2 className="section-divider">유사 물건 분석</h2>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'stretch' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <NearbyPropertyMap
-            data={data.nearby_property_trends}
-            targetAddress={data.property_basic_info.address}
-          />
+          {data.nearby_property_trends?.target_lat != null && (
+            <NearbyPropertyMap
+              data={data.nearby_property_trends}
+              targetAddress={data.property_basic_info.address}
+            />
+          )}
           <NearbyPropertyList
             data={data.nearby_property_trends}
           />

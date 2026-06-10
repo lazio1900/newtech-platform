@@ -190,9 +190,9 @@ class SimilarProperty(BaseModel):
     age: int
     area: int                          # 비교 면적 (평)
     exclusive_m2: Optional[float] = None
-    lat: float
-    lng: float
-    distance_m: Optional[int] = None   # 타겟 단지로부터의 거리 (m)
+    lat: Optional[float] = None         # 내부망(CCTR)엔 좌표 없음 → None
+    lng: Optional[float] = None
+    distance_m: Optional[int] = None   # 타겟 단지로부터의 거리 (m). 내부망은 None(행정구역 기반)
     similarity: Optional[float] = None # 유사도 점수 (0~1)
     recent_price: int
     price_change_rate: float
@@ -200,11 +200,12 @@ class SimilarProperty(BaseModel):
 
 
 class NearbyPropertyTrends(BaseModel):
-    """인근 유사 물건지 동향"""
-    target_lat: float
-    target_lng: float
+    """인근 유사 물건지 동향. 내부망(CCTR)은 좌표·반경 없이 행정구역(법정동/시군구) 기반."""
+    target_lat: Optional[float] = None         # 내부망은 None(지도 비표시)
+    target_lng: Optional[float] = None
     target_recent_price: Optional[int] = None  # 비교 기준이 되는 타겟 단지 최근 거래가
-    radius_m: Optional[int] = None              # 적용된 검색 반경
+    radius_m: Optional[int] = None              # 적용된 검색 반경. 내부망은 None
+    scope: Optional[str] = None                 # 내부망 비교 범위 표기 (예: "법정동 무악동")
     avg_change_rate: Optional[float] = None     # 인근 평균 변동률
     similar_properties: List[SimilarProperty]
 
