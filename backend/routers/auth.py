@@ -21,10 +21,6 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     user_id: str = Field(..., min_length=3, max_length=80)
     password: str = Field(..., min_length=4, max_length=200)
-    company_name: str = Field(..., min_length=1, max_length=200)
-    ceo_name: str = Field(..., min_length=1, max_length=80)
-    business_number: str = Field(..., min_length=1, max_length=40)
-    phone: str = Field(..., min_length=1, max_length=40)
 
 
 @router.post("/login")
@@ -57,10 +53,6 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
             user_id=request.user_id,
             password=request.password,
             role=UserRole.CUSTOMER,
-            company_name=request.company_name,
-            ceo_name=request.ceo_name,
-            business_number=request.business_number,
-            phone=request.phone,
         )
     except ValueError:
         return {"status": "error", "message": "이미 존재하는 아이디입니다."}

@@ -35,10 +35,6 @@ export const login = async (userId: string, password: string): Promise<LoginResp
 export const register = async (userData: {
   user_id: string;
   password: string;
-  company_name: string;
-  ceo_name: string;
-  business_number: string;
-  phone: string;
 }): Promise<RegisterResponse> => {
   const { data } = await apiClient.post<RegisterResponse>('/api/register', userData);
   return data;
