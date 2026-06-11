@@ -145,7 +145,7 @@ export default function PriceCharts({ data }: PriceChartsProps) {
       : (data.jb_fair_price ? [{ date: new Date().toISOString().split('T')[0], price: data.jb_fair_price }] : [])
   ).filter(p => _inWindow(p.date)).map(_toPoint);
   const latestJbPrice = data.jb_fair_price || jbHistoryData[jbHistoryData.length - 1]?.price || 0;
-  const jbWeights = data.jb_detail?.weights || { kb: 0.3, molit: 0.6, naver: 0.1 };
+  const jbWeights = data.jb_detail?.weights || { kb: 0.4, molit: 0.6, naver: 0.0 };
 
   // JB 차트 데이터 — 실측(history) + 예측(forecast 향후 3개월만). 6개월 윈도우.
   const forecastSrc = (data.jb_detail?.forecast || []).slice(0, 4);  // m=0..3

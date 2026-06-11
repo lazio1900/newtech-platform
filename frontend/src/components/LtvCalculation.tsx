@@ -77,7 +77,7 @@ export default function LtvCalculation({ rightsData, creditData, loanAmount, int
       <div className="ltv-result-grid">
         <div className="ltv-result-box">
           <div className="ltv-result-header">JB 적정시세 기준</div>
-          <div className="ltv-result-sub">(KB×0.3 + 실거래×0.6 + 호가×0.1)</div>
+          <div className="ltv-result-sub">(KB×0.4 + 실거래×0.6)</div>
           <div className="ltv-result-price">{formatEok(jbFair)}</div>
           <div
             className="ltv-value"

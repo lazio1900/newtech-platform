@@ -395,7 +395,7 @@ def perform_full_analysis(
     total_prior = property_rights_info.max_bond_amount + property_rights_info.tenant_deposit + loan_amount
     kb_est = credit_data.kb_price.estimated if credit_data else 0  # 내부전용 시세 없으면 0 → LTV 확인 불가
     ltv_current = round(total_prior / kb_est * 100, 1) if kb_est > 0 else 0
-    # JB 적정시세 기준 LTV (KB×0.3 + 실거래×0.6 + 호가×0.1)
+    # JB 적정시세 기준 LTV (기본 가중치 KB×0.4 + 실거래×0.6, 호가 0%)
     jb_basis = (credit_data.jb_fair_price or credit_data.kb_price.low or kb_est) if credit_data else 0
     ltv_jb = round(total_prior / jb_basis * 100, 1) if jb_basis > 0 else 0
 
