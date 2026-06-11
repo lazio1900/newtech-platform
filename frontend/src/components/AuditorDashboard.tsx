@@ -71,6 +71,8 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
   const [opinionSaved, setOpinionSaved] = useState<boolean>(false);
   const [showReviewReport, setShowReviewReport] = useState<boolean>(false);
   const [showApproveConfirm, setShowApproveConfirm] = useState<boolean>(false);
+  // 심사의견서 수기 입력란(현업이 채우는 빈칸) — 키별 값
+  const [reportFields, setReportFields] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchApplications();
@@ -420,6 +422,16 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
         const fin2 = [...b.financial_data].sort((x, y) => y.year - x.year).slice(0, 2);
         const overallOpinion = auditorOpinion || data.ai_analysis.auditor_recommendation || '';
         const productName = '주택 근저당권부 질권대출';
+        // 현업 수기 입력란 — 빈칸을 직접 채워 출력. Word 내보내기 시 값으로 치환됨.
+        const rInput = (key: string, def = '', inline = false) => (
+          <input className={inline ? 'report-edit report-edit-inline' : 'report-edit'}
+            value={key in reportFields ? reportFields[key] : def}
+            onChange={(e) => setReportFields((p) => ({ ...p, [key]: e.target.value }))} />
+        );
+        const rArea = (key: string, def = '') => (
+          <textarea className="report-edit-area" rows={2} value={key in reportFields ? reportFields[key] : def}
+            onChange={(e) => setReportFields((p) => ({ ...p, [key]: e.target.value }))} />
+        );
 
         return (
         <div className="modal-overlay" onClick={() => setShowReviewReport(false)}>
@@ -436,8 +448,8 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   <table className="report-table report-approval">
                     <tbody>
                       <tr>
-                        <th>전결권자</th><td></td>
-                        <th>검토자</th><td>{user.ceo_name || user.user_id}</td><td></td>
+                        <th>전결권자</th><td>{rInput('전결권자')}</td>
+                        <th>검토자</th><td>{rInput('검토자', user.ceo_name || user.user_id)}</td><td></td>
                       </tr>
                     </tbody>
                   </table>
@@ -460,14 +472,14 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                         <th>차주명</th><td colSpan={2}>㈜{b.company_name}</td>
                       </tr>
                       <tr>
-                        <th>설정순위</th><td></td>
-                        <th>상환방식</th><td></td>
+                        <th>설정순위</th><td>{rInput('설정순위')}</td>
+                        <th>상환방식</th><td>{rInput('상환방식')}</td>
                         <td>대출기간 / {loanDuration} 개월</td>
                       </tr>
                       <tr>
                         <th>대출금액(원)</th><td>{loanAmount.toLocaleString()}</td>
                         <td>대출금리 / {interestRate != null ? `${interestRate}%` : ''}</td>
-                        <td colSpan={2}>자금용도 / </td>
+                        <td colSpan={2}>자금용도 / {rInput('자금용도', '', true)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -507,9 +519,9 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   <table className="report-table">
                     <tbody>
                       <tr><th>사업자명</th><td>㈜{b.company_name}</td><th>사업자번호</th><td>{b.business_number || ''}</td></tr>
-                      <tr><th>대표자명</th><td>{b.ceo_name || ''}</td><th>설립일자</th><td></td></tr>
-                      <tr><th>주요주주현황</th><td colSpan={3}></td></tr>
-                      <tr><th>소재지</th><td colSpan={3}></td></tr>
+                      <tr><th>대표자명</th><td>{b.ceo_name || ''}</td><th>설립일자</th><td>{rInput('설립일자')}</td></tr>
+                      <tr><th>주요주주현황</th><td colSpan={3}>{rInput('주요주주현황')}</td></tr>
+                      <tr><th>소재지</th><td colSpan={3}>{rInput('소재지')}</td></tr>
                     </tbody>
                   </table>
                   <table className="report-table" style={{ marginTop: 6 }}>
@@ -521,7 +533,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                         <tr key={f.year}>
                           <td>{String(f.year).slice(2)}.12.31</td>
                           <td>{fmtM(f.assets)}</td><td>{fmtM(f.liabilities)}</td><td>{fmtM(f.equity)}</td>
-                          <td></td>
+                          <td>{rInput(`자본금_${f.year}`)}</td>
                           <td>{fmtM(f.revenue)}</td><td>{fmtM(f.operating_profit)}</td><td>{fmtM(f.net_income)}</td>
                         </tr>
                       )) : (<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>)}
@@ -541,7 +553,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   <h4>5. 채무관계인 연대보증인 현황 <span className="report-unit">[단위:백만원]</span></h4>
                   <table className="report-table">
                     <tbody>
-                      <tr><th>성명</th><td>{g.name || ''}</td><th>생년월일</th><td></td><th>채무자관계</th><td>{g.name && g.name === b.ceo_name ? '대표' : ''}</td><th>NICE</th><td>{g.credit_score_nice ?? ''}</td></tr>
+                      <tr><th>성명</th><td>{g.name || ''}</td><th>생년월일</th><td>{rInput('생년월일')}</td><th>채무자관계</th><td>{g.name && g.name === b.ceo_name ? '대표' : ''}</td><th>NICE</th><td>{g.credit_score_nice ?? ''}</td></tr>
                     </tbody>
                   </table>
                   <table className="report-table" style={{ marginTop: 6 }}>
@@ -559,7 +571,7 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   <h4>6. 영업부서 의견</h4>
                   <div className="report-opinion-box">
                     <p className="report-line">- 담보 : KB시세 {fmtM(kb.estimated)}백만원 / 최근실거래가 {fmtM(molit.recent_price)}백만원{molit.transaction_date ? ` (${molit.transaction_date})` : ''}</p>
-                    <p className="report-line">- 검토의견 : </p>
+                    <p className="report-line">- 검토의견 : {rInput('검토의견', '', true)}</p>
                   </div>
                 </div>
 
@@ -568,9 +580,9 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                   <h4>7. 기업심사팀 의견</h4>
                   <table className="report-table">
                     <tbody>
-                      <tr><th className="report-cat">긍정의견</th><td className="report-opinion-cell"></td></tr>
-                      <tr><th className="report-cat">부정의견</th><td className="report-opinion-cell"></td></tr>
-                      <tr><th className="report-cat">종합의견</th><td className="report-opinion-cell">{overallOpinion}</td></tr>
+                      <tr><th className="report-cat">긍정의견</th><td className="report-opinion-cell">{rArea('긍정의견')}</td></tr>
+                      <tr><th className="report-cat">부정의견</th><td className="report-opinion-cell">{rArea('부정의견')}</td></tr>
+                      <tr><th className="report-cat">종합의견</th><td className="report-opinion-cell">{rArea('종합의견', overallOpinion)}</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -585,6 +597,18 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
               <button className="btn-primary" onClick={() => {
                 const reportEl = document.querySelector('.review-report-document');
                 if (!reportEl) return;
+                // 컨트롤드 input/textarea 값은 innerHTML 에 담기지 않으므로,
+                // 복제본의 입력란을 현재 입력값 텍스트로 치환한 뒤 내보낸다.
+                const clone = reportEl.cloneNode(true) as HTMLElement;
+                const liveFields = reportEl.querySelectorAll('input, textarea');
+                clone.querySelectorAll('input, textarea').forEach((node, i) => {
+                  const live = liveFields[i] as HTMLInputElement | HTMLTextAreaElement | undefined;
+                  const span = document.createElement('span');
+                  span.textContent = live ? live.value : '';
+                  span.style.whiteSpace = 'pre-wrap';
+                  node.replaceWith(span);
+                });
+                const reportHtml = clone.innerHTML;
                 // Word 호환 HTML (.doc) — Word/한컴 등에서 그대로 열림.
                 // 진짜 OOXML(.docx) 는 별도 라이브러리(docx) 필요.
                 const html = `<!DOCTYPE html>
@@ -617,7 +641,7 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
 .approved{background:#e6f9f0;color:#20c997}
 .report-footer{margin-top:30px;text-align:right;font-size:12px;color:#666;border-top:1px solid #ccc;padding-top:12px}
 .warning{color:#EF5350}
-</style></head><body>${reportEl.innerHTML}</body></html>`;
+</style></head><body>${reportHtml}</body></html>`;
                 const blob = new Blob(['﻿', html], {
                   type: 'application/msword;charset=utf-8',
                 });

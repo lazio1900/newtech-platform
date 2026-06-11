@@ -486,6 +486,46 @@ body {
   margin: 4px 0;
 }
 
+.report-edit {
+  width: 100%;
+  border: none;
+  border-bottom: 1px dashed #B0BEC5;
+  background: #FAFCFE;
+  font: inherit;
+  color: #006FBD;
+  padding: 2px 4px;
+  box-sizing: border-box;
+}
+
+.report-edit.report-edit-inline {
+  width: auto;
+  min-width: 120px;
+}
+
+.report-edit:focus {
+  outline: none;
+  border-bottom-color: #006FBD;
+  background: #E8F6FA;
+}
+
+.report-edit-area {
+  width: 100%;
+  border: 1px dashed #B0BEC5;
+  border-radius: 4px;
+  background: #FAFCFE;
+  font: inherit;
+  color: #006FBD;
+  padding: 4px 6px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.report-edit-area:focus {
+  outline: none;
+  border-color: #006FBD;
+  background: #E8F6FA;
+}
+
 .info-card {
   background-color: #FFFFFF;
   padding: 20px;
