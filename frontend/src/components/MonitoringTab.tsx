@@ -10,7 +10,6 @@ import PriceCharts from './PriceCharts';
 import AIPropertyAnalysis from './AIPropertyAnalysis';
 import AIRightsAnalysis from './AIRightsAnalysis';
 import AIMarketAnalysis from './AIMarketAnalysis';
-import RegistryModal from './RegistryModal';
 import type { MonitoringLoan, MonitoringSummary, AnalysisResponse } from '@/types/loan';
 import './MonitoringTab.css';
 
@@ -21,7 +20,6 @@ export default function MonitoringTab() {
   const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
   const [detailData, setDetailData] = useState<AnalysisResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
-  const [showRegistryModal, setShowRegistryModal] = useState<boolean>(false);
 
   // 정렬
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -130,7 +128,6 @@ export default function MonitoringTab() {
     setShowDetailModal(false);
     setSelectedLoan(null);
     setDetailData(null);
-    setShowRegistryModal(false);
   };
 
   const formatAmount = (value: number | undefined | null): string => {
@@ -400,7 +397,6 @@ export default function MonitoringTab() {
                   <div className="layout-row">
                     <PropertyRightsInfo
                       data={detailData.property_rights_info}
-                      onViewPDF={() => setShowRegistryModal(true)}
                     />
                     <AIRightsAnalysis analysis={detailData.ai_analysis.rights_analysis} />
                   </div>
@@ -427,9 +423,6 @@ export default function MonitoringTab() {
         </div>
       )}
 
-      {showRegistryModal && detailData && (
-        <RegistryModal onClose={() => setShowRegistryModal(false)} />
-      )}
     </div>
   );
 }

@@ -762,24 +762,6 @@ body {
   margin: 0;
 }
 
-.pdf-view-btn {
-  padding: 8px 16px;
-  background-color: #006FBD;
-  color: #FFFFFF;
-  border: none;
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  font-family: 'Noto Sans KR', sans-serif;
-  white-space: nowrap;
-}
-
-.pdf-view-btn:hover {
-  background-color: #005A9E;
-}
-
 /* 재무 테이블 */
 .financial-table-container {
   margin-top: 16px;

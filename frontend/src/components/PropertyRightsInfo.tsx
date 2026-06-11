@@ -3,7 +3,6 @@ import type { PropertyRightsData } from '@/types/loan';
 
 interface PropertyRightsInfoProps {
   data: PropertyRightsData | null | undefined;
-  onViewPDF: () => void;
 }
 
 interface Col<T> {
@@ -38,16 +37,13 @@ function RightsTable<T>({ rows, cols }: { rows: T[]; cols: Col<T>[] }) {
   );
 }
 
-export default function PropertyRightsInfo({ data, onViewPDF }: PropertyRightsInfoProps) {
+export default function PropertyRightsInfo({ data }: PropertyRightsInfoProps) {
   if (!data) return null;
 
   return (
     <div className="info-card rights-highlight">
       <div className="card-header">
         <h3>담보 물건 권리 정보 조회 영역</h3>
-        <button className="pdf-view-btn" onClick={onViewPDF}>
-          등기부등본 원본 보기
-        </button>
       </div>
 
       <div className="info-content">

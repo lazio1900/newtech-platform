@@ -9,7 +9,6 @@ import PriceCharts from './PriceCharts';
 import AIPropertyAnalysis from './AIPropertyAnalysis';
 import AIRightsAnalysis from './AIRightsAnalysis';
 import AIMarketAnalysis from './AIMarketAnalysis';
-import RegistryModal from './RegistryModal';
 import MonitoringTab from './MonitoringTab';
 import NearbyPropertyMap from './NearbyPropertyMap';
 import NearbyPropertyList from './NearbyPropertyList';
@@ -66,7 +65,6 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
   const [appAnalysisData, setAppAnalysisData] = useState<AnalysisResponse | null>(null);
   const [appAnalysisError, setAppAnalysisError] = useState<string | null>(null);
   const [appLoading, setAppLoading] = useState<boolean>(false);
-  const [showAppRegistryModal, setShowAppRegistryModal] = useState<boolean>(false);
 
   // 심사역 종합 의견
   const [auditorOpinion, setAuditorOpinion] = useState<string>('');
@@ -240,12 +238,9 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
 
   const renderAnalysisResult = (
     data: AnalysisResponse,
-    showModal: boolean,
-    setShowModal: (v: boolean) => void,
     loanAmount: number,
     interestRate: number = 7.5,
     loanDuration: number = 12,
-    registryIcId: number | null = null,
   ) => (
     <div className="content-layout">
       <h2 className="section-divider">담보 물건 분석</h2>
@@ -309,7 +304,6 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
       <div className="layout-row">
         <PropertyRightsInfo
           data={data.property_rights_info}
-          onViewPDF={() => setShowModal(true)}
         />
         <AIRightsAnalysis analysis={data.ai_analysis.rights_analysis} />
       </div>
@@ -409,12 +403,6 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
         </button>
       </div>
 
-      {showModal && (
-        <RegistryModal
-          onClose={() => setShowModal(false)}
-          icId={registryIcId}
-        />
-      )}
 
       {showReviewReport && (() => {
         const ri = data.property_rights_info;
@@ -911,7 +899,6 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
               setSelectedApp(null);
               setAppAnalysisData(null);
               setAppAnalysisError(null);
-              setShowAppRegistryModal(false);
               setActiveTab('applications');
             }}
           >
@@ -1380,9 +1367,8 @@ h4{margin:20px 0 8px;font-size:14px;border-bottom:2px solid #051C48;padding-bott
                 )}
 
                 {appAnalysisData && !appLoading && renderAnalysisResult(
-                  appAnalysisData, showAppRegistryModal, setShowAppRegistryModal,
+                  appAnalysisData,
                   selectedApp.loan_amount, 7.5, selectedApp.loan_duration,
-                  selectedApp.registry_ic_id ?? null,
                 )}
 
                 {!appLoading && !appAnalysisData && appAnalysisError && (
