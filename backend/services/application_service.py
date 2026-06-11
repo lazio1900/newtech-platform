@@ -1,13 +1,25 @@
 """대출 신청 서비스 (DB 기반)."""
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from models import ALLOWED_TRANSITIONS, ApplicationStatus, LoanApplication, User
+
+
+def _next_application_id(db: Session) -> str:
+    """신청번호 YYYY-NNNN — 연도 내 오름차순 일련번호 (랜덤 UUID 대체)."""
+    year = datetime.utcnow().strftime("%Y")
+    prefix = f"{year}-"
+    max_seq = 0
+    for (rid,) in db.query(LoanApplication.id).filter(LoanApplication.id.like(f"{prefix}%")).all():
+        try:
+            max_seq = max(max_seq, int(rid.split("-", 1)[1]))
+        except (IndexError, ValueError):
+            continue
+    return f"{prefix}{max_seq + 1:04d}"
 
 
 def submit(
@@ -33,7 +45,7 @@ def submit(
     rles_unq_no: Optional[str] = None,
 ) -> LoanApplication:
     app = LoanApplication(
-        id=str(uuid.uuid4())[:8],
+        id=_next_application_id(db),
         applicant_user_id=applicant.id,
         company_name=company_name,
         ceo_name=ceo_name,
