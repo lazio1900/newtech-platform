@@ -144,7 +144,7 @@ def _build_credit_from_cctr(db: Session, kb: str, area_obj: Optional[Area]) -> O
         and (exclusive is None or (r.apt_are is not None and abs(r.apt_are - exclusive) <= 5.0))
     ]
 
-    monthly = aggregate_monthly_series(kb_raw, txn_raw, [], start_month, end_month)
+    monthly = aggregate_monthly_series(kb_raw, txn_raw, start_month, end_month)
     jb_points: list[PricePoint] = []
     jb_tuples: list[tuple[int, int, int]] = []
     for agg in monthly:

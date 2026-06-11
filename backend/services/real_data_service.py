@@ -293,31 +293,8 @@ def build_real_credit_data(
     )
     txn_raw = [(r[0], r[1]) for r in txn_rows]
 
-    # 호가 — status 와 무관히 posted_at 기준 (closed 매물도 그 월에 살아있었던 것이면 반영).
-    # 매매 거래유형만, 면적 ±5㎡ 톨러런스.
-    listing_rows = (
-        db.query(Listing.posted_at, Listing.status_updated_at, Listing.ask_price)
-        .filter(
-            Listing.complex_id == complex_obj.id,
-            Listing.ask_price.isnot(None),
-            Listing.trade_type == "매매",
-            Listing.exclusive_m2.between(
-                area_obj.exclusive_m2 - 5.0,
-                area_obj.exclusive_m2 + 5.0,
-            ),
-        )
-        .all()
-    )
-    listing_raw: list[tuple[date, Optional[date], int]] = []
-    for posted, status_upd, price in listing_rows:
-        if posted is None:
-            continue
-        p_d = posted.date() if hasattr(posted, "date") else posted
-        s_d = status_upd.date() if status_upd and hasattr(status_upd, "date") else status_upd
-        listing_raw.append((p_d, s_d, price))
-
-    # 월별 집계 → 월별 JB 산출 → history
-    monthly = aggregate_monthly_series(kb_raw, txn_raw, listing_raw, start_month, end_month)
+    # 월별 집계 → 월별 JB 산출 → history (JB 는 KB·실거래만 사용)
+    monthly = aggregate_monthly_series(kb_raw, txn_raw, start_month, end_month)
 
     jb_history_points: list[PricePoint] = []
     jb_history_tuples: list[tuple[int, int, int]] = []

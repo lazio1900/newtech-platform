@@ -1,12 +1,11 @@
 """JB 적정시세 — 월별 대표값 × 고정 가중치 + OLS 예측.
 
 산출 흐름:
-1. 월별 집계: KB / 실거래 / 호가의 그 달 대표값
+1. 월별 집계: KB / 실거래 의 그 달 대표값
    - KB: 그 달 KB 스냅샷의 general_price 산술 평균
    - 실거래: 그 달 거래가의 IQR(1.5×) 이상치 제거 후 평균
-   - 호가: 그 달에 살아있던 매물의 ask_price IQR(1.5×) 이상치 제거 후 평균
 2. 시점별 JB: 사람이 정한 고정 가중치로 가중평균.
-   - W_KB=0.4 / W_MOLIT=0.6 / W_NAVER=0.0 (호가는 수집 정상화 후 활성)
+   - W_KB=0.4 / W_MOLIT=0.6
    - 그 달 실거래 결측이면 KB 단독 폴백
 3. 예측: JB history 시계열을 로그-선형 OLS 회귀,
    잔차 표준편차로 80% 예측구간.
@@ -39,19 +38,6 @@ def iqr_filter(prices: List[int], multiplier: float = 1.5) -> List[int]:
     return filtered
 
 
-def listing_count_confidence(active_count: int) -> float:
-    """매물 수 → 호가 신뢰도 (0~1)."""
-    if active_count >= 20:
-        return 1.0
-    if active_count >= 10:
-        return 0.7
-    if active_count >= 5:
-        return 0.4
-    if active_count >= 1:
-        return 0.15
-    return 0.0
-
-
 def transaction_count_confidence(count: int) -> float:
     """월 거래 건수 → 실거래 신뢰도. 5건 이상이면 1.0."""
     if count <= 0:
@@ -68,8 +54,6 @@ class MonthlyAggregate:
     kb_sample_count: int = 0
     molit: Optional[int] = None        # IQR 후 평균
     molit_sample_count: int = 0        # IQR 후 건수
-    naver: Optional[int] = None        # IQR 후 평균
-    naver_sample_count: int = 0        # 그 월에 살아있던 매물 수 (IQR 후)
 
 
 def _month_iter(start: date, end: date) -> List[Tuple[int, int]]:
@@ -83,37 +67,16 @@ def _month_iter(start: date, end: date) -> List[Tuple[int, int]]:
     return out
 
 
-def _month_bounds(year: int, month: int) -> Tuple[date, date]:
-    """월의 [첫날, 다음달 첫날) 반열린 구간."""
-    first = date(year, month, 1)
-    if month == 12:
-        next_first = date(year + 1, 1, 1)
-    else:
-        next_first = date(year, month + 1, 1)
-    return first, next_first
-
-
 def aggregate_monthly_series(
     kb_points: List[Tuple[date, int]],
     transactions: List[Tuple[date, int]],
-    listings: List[Tuple[date, Optional[date], int]],
     start: date,
     end: date,
-    listings_cold_start_months: int = 12,
 ) -> List[MonthlyAggregate]:
     """start~end 사이의 (year, month) 격자로 월별 집계.
 
     kb_points: [(as_of_date, general_price)]
     transactions: [(contract_date, price)]
-    listings: [(posted_at_date, status_updated_at_date or None, ask_price)]
-        호가의 "월 t 에 살아있던" 정의:
-          posted_at < 다음달 1일 AND (status_updated_at is None OR status_updated_at >= 월초)
-        (status_updated_at=None 은 여전히 ACTIVE 라는 의미로 취급)
-
-    listings_cold_start_months:
-        그 단지의 *최초* posted_at 으로부터 N 개월(캘린더 기준) 미만인 월은
-        호가 표본을 사용하지 않는다 (강제 None). cold-start 단지에서 KB·실거래만으로
-        JB 산출되도록.
     """
     keys = _month_iter(start, end)
     by_ym: dict[Tuple[int, int], MonthlyAggregate] = {
@@ -149,34 +112,6 @@ def aggregate_monthly_series(
         a.molit = int(round(sum(filtered) / len(filtered)))
         a.molit_sample_count = len(filtered)
 
-    # 호가 cold-start — 단지의 최초 posted_at 으로부터 12개월(캘린더) 미만인 월은 표본 사용 X
-    valid_postings = [p for p, _, _ in listings if p is not None]
-    listings_first = min(valid_postings) if valid_postings else None
-
-    # 호가 — 살아있던 매물 IQR 후 평균
-    for k in keys:
-        if listings_first is None:
-            continue
-        months_since_first = (k[0] - listings_first.year) * 12 + (k[1] - listings_first.month)
-        if months_since_first < listings_cold_start_months:
-            continue
-        first, next_first = _month_bounds(*k)
-        alive: List[int] = []
-        for posted, status_updated, price in listings:
-            if not price or price <= 0 or posted is None:
-                continue
-            if posted >= next_first:
-                continue
-            if status_updated is not None and status_updated < first:
-                continue
-            alive.append(price)
-        if not alive:
-            continue
-        filtered = iqr_filter(alive)
-        a = by_ym[k]
-        a.naver = int(round(sum(filtered) / len(filtered)))
-        a.naver_sample_count = len(filtered)
-
     return [by_ym[k] for k in keys]
 
 
@@ -192,10 +127,9 @@ class JBPoint:
     sample_counts: dict[str, int]
 
 
-# 사람-정의 고정 가중치. 호가는 수집 안정화 후 활성. 합 1.0 이어야 함.
+# 사람-정의 고정 가중치. 합 1.0 이어야 함.
 W_KB = 0.4
 W_MOLIT = 0.6
-W_NAVER = 0.0
 
 
 def compute_jb_for_month(agg: MonthlyAggregate) -> JBPoint:
@@ -203,22 +137,20 @@ def compute_jb_for_month(agg: MonthlyAggregate) -> JBPoint:
 
     - KB 없으면 산출 X (jb_fair_price=None).
     - 실거래 결측이면 KB 단독 (weights kb=1.0).
-    - 호가는 W_NAVER=0 이라 실질 무시 (cold-start 후에 활성화).
     """
-    sources = {"kb": agg.kb, "molit": agg.molit, "naver": agg.naver}
+    sources = {"kb": agg.kb, "molit": agg.molit}
     samples = {
         "kb": agg.kb_sample_count,
         "molit": agg.molit_sample_count,
-        "naver": agg.naver_sample_count,
     }
 
     if not agg.kb:
         return JBPoint(
             year=agg.year, month=agg.month,
             jb_fair_price=None,
-            weights={"kb": 0.0, "molit": 0.0, "naver": 0.0},
+            weights={"kb": 0.0, "molit": 0.0},
             sources=sources,
-            confidence={"kb": 0.0, "molit": 0.0, "naver": 0.0},
+            confidence={"kb": 0.0, "molit": 0.0},
             sample_counts=samples,
         )
 
@@ -227,20 +159,20 @@ def compute_jb_for_month(agg: MonthlyAggregate) -> JBPoint:
         return JBPoint(
             year=agg.year, month=agg.month,
             jb_fair_price=int(agg.kb),
-            weights={"kb": 1.0, "molit": 0.0, "naver": 0.0},
+            weights={"kb": 1.0, "molit": 0.0},
             sources=sources,
-            confidence={"kb": 1.0, "molit": 0.0, "naver": 0.0},
+            confidence={"kb": 1.0, "molit": 0.0},
             sample_counts=samples,
         )
 
-    # 정상: KB×W_KB + 실거래×W_MOLIT (호가는 W_NAVER=0 으로 자동 제외)
-    jb = agg.kb * W_KB + agg.molit * W_MOLIT + (agg.naver or 0) * W_NAVER
+    # 정상: KB×W_KB + 실거래×W_MOLIT
+    jb = agg.kb * W_KB + agg.molit * W_MOLIT
     return JBPoint(
         year=agg.year, month=agg.month,
         jb_fair_price=int(round(jb)),
-        weights={"kb": W_KB, "molit": W_MOLIT, "naver": W_NAVER},
+        weights={"kb": W_KB, "molit": W_MOLIT},
         sources=sources,
-        confidence={"kb": 1.0, "molit": 1.0 if agg.molit else 0.0, "naver": 1.0 if agg.naver else 0.0},
+        confidence={"kb": 1.0, "molit": 1.0 if agg.molit else 0.0},
         sample_counts=samples,
     )
 
@@ -264,7 +196,7 @@ def compute_latest_jb(series: List[MonthlyAggregate]) -> Optional[JBComputeResul
         w = pt.weights
         notes = [
             f"수행달 {agg.year}-{agg.month:02d}",
-            f"수행달 가중치: KB {w['kb']*100:.0f}% / 실거래 {w['molit']*100:.0f}% / 호가 {w['naver']*100:.0f}%",
+            f"수행달 가중치: KB {w['kb']*100:.0f}% / 실거래 {w['molit']*100:.0f}%",
         ]
         if agg.kb:
             notes.append(f"KB {agg.kb_sample_count}건 평균 {agg.kb:,}원")
@@ -272,10 +204,6 @@ def compute_latest_jb(series: List[MonthlyAggregate]) -> Optional[JBComputeResul
             notes.append(f"실거래 {agg.molit_sample_count}건 평균 {agg.molit:,}원 (IQR 후)")
         else:
             notes.append("실거래 결측 → KB 단독 폴백")
-        if agg.naver:
-            notes.append(f"호가 {agg.naver_sample_count}건 평균 {agg.naver:,}원 (IQR 후, 현재 W=0 미반영)")
-        else:
-            notes.append("호가 데이터 없음")
         return JBComputeResult(
             jb_fair_price=pt.jb_fair_price,
             weights=pt.weights,
