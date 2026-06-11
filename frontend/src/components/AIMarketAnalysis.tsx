@@ -8,7 +8,6 @@ interface AIMarketAnalysisProps {
 const SOURCE_LABEL: Record<string, string> = {
   kb: 'KB 추정가',
   molit: '실거래(국토부)',
-  naver: '호가(KB 매물)',
 };
 
 function formatEok(won: number | null | undefined): string {
@@ -22,7 +21,7 @@ function formatPct(v: number | null | undefined, digits = 1): string {
 }
 
 function JBBreakdown({ detail }: { detail: JBFairPriceDetail }) {
-  const keys = ['kb', 'molit', 'naver'] as const;
+  const keys = ['kb', 'molit'] as const;
   const center3 = detail.forecast?.[3];
   return (
     <details className="jb-breakdown">
@@ -32,8 +31,7 @@ function JBBreakdown({ detail }: { detail: JBFairPriceDetail }) {
           <h4>JB 적정시세 — 수행달 가중치</h4>
           <p className="jb-formula">
             JB = KB×<b>{formatPct(detail.weights.kb, 0)}</b> + 실거래×
-            <b>{formatPct(detail.weights.molit, 0)}</b> + 호가×
-            <b>{formatPct(detail.weights.naver, 0)}</b> ={' '}
+            <b>{formatPct(detail.weights.molit, 0)}</b> ={' '}
             <b>{formatEok(detail.fair_price)}</b>
           </p>
           <table className="jb-source-table">
@@ -64,11 +62,10 @@ function JBBreakdown({ detail }: { detail: JBFairPriceDetail }) {
             </ul>
           )}
           <p className="jb-method-hint">
-            ※ 산출식: JB = (그 달 KB 평균)·40% + (그 달 실거래 IQR-평균)·60% + (그 달 호가 IQR-평균)·0%.
+            ※ 산출식: JB = (그 달 KB 평균)·40% + (그 달 실거래 IQR-평균)·60%.
             수행달에 실거래 표본이 없으면 KB 단독(100%) 폴백.
-            호가는 단지별 수집이 안정화되면 활성 예정.
             <br />
-            ※ 월 대표값 계산: KB 는 그 달 스냅샷의 산술평균, 실거래·호가는 그 달 표본에서 IQR(1.5×) 이상치 제거 후 평균.
+            ※ 월 대표값 계산: KB 는 그 달 스냅샷의 산술평균, 실거래는 그 달 표본에서 IQR(1.5×) 이상치 제거 후 평균.
             <br />
             ※ 위 표의 가중치는 항상 "수행달" 의 가용 데이터 기준으로 표기됩니다.
           </p>

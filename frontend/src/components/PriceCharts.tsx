@@ -135,7 +135,6 @@ export default function PriceCharts({ data }: PriceChartsProps) {
 
   const kbData: ChartDataPoint[] = data.kb_price.history.filter(p => _inWindow(p.date)).map(_toPoint);
   const molitData: ChartDataPoint[] = data.molit_transactions.history.filter(p => _inWindow(p.date)).map(_toPoint);
-  const naverData: ChartDataPoint[] = data.naver_listings.history.filter(p => _inWindow(p.date)).map(_toPoint);
 
   // JB 적정시세 추이 — backend 산출. 시점이 1개라도 표시.
   const jbHistorySrc = data.jb_detail?.history || [];
@@ -189,13 +188,12 @@ export default function PriceCharts({ data }: PriceChartsProps) {
     if (!jbXTicks.includes(endTs)) jbXTicks.push(endTs);
   }
 
-  // 3개 차트 공통 Y축 범위 (KB, 실거래가, 매매호가) — 데이터 없을 때 가드.
+  // 차트 공통 Y축 범위 (KB, 실거래가) — 데이터 없을 때 가드.
   // KB 상하한 표시 위해 low/high 도 포함.
   const allPrices = [
     ...kbData.map(d => d.price),
     ...kbData.flatMap(d => (d.low != null && d.high != null ? [d.low, d.high] : [])),
     ...molitData.map(d => d.price),
-    ...naverData.map(d => d.price),
   ].filter(v => v > 0);
   const priceMin = allPrices.length > 0 ? Math.min(...allPrices) : 0;
   const priceMax = allPrices.length > 0 ? Math.max(...allPrices) : 100000000;
@@ -304,7 +302,6 @@ export default function PriceCharts({ data }: PriceChartsProps) {
             <span style={{ marginRight: 8, color: '#444', fontWeight: 600 }}>수행달 가중치</span>
             <span style={{ marginRight: 12 }}>KB <strong style={{ color: '#006FBD' }}>{Math.round((jbWeights.kb || 0) * 100)}%</strong></span>
             <span style={{ marginRight: 12 }}>실거래 <strong style={{ color: '#7DCCE5' }}>{Math.round((jbWeights.molit || 0) * 100)}%</strong></span>
-            <span style={{ marginRight: 12 }}>호가 <strong style={{ color: '#051C48' }}>{Math.round((jbWeights.naver || 0) * 100)}%</strong></span>
             <span>현재 <strong style={{ color: '#FF8C00' }}>{formatPrice(latestJbPrice)}</strong></span>
           </div>
         </div>
