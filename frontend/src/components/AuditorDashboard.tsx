@@ -409,16 +409,17 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
         // INTERNAL_ONLY: 시세 없으면 확인 불가 → 0/빈값으로 표시(보고서는 '-' 처리됨)
         const kb = data.credit_data?.kb_price ?? { estimated: 0, high: 0, low: 0, trend: '-', history: [] };
         const molit = data.credit_data?.molit_transactions ?? { recent_price: null, transaction_date: null, trend: '-', history: [] };
-        const jbFair = data.credit_data?.jb_fair_price ?? kb.low;
-        const ls = data.ai_analysis.location_scores;
-        const cs = data.ai_analysis.complex_scores;
         const totalPrior = (ri.max_bond_amount || 0) + (ri.tenant_deposit || 0) + loanAmount;
         const ltvCurrent = kb.estimated > 0 ? (totalPrior / kb.estimated * 100).toFixed(1) : '-';
-        const ltvJB = jbFair > 0 ? (totalPrior / jbFair * 100).toFixed(1) : '-';
-        const nearbyProps = data.nearby_property_trends?.similar_properties || [];
-        const pyeongData = data.price_per_pyeong_trend?.data || [];
-        // 심사 상태: 신청건 분석이면 selectedApp.status, 직접분석이면 "검토 필요"
-        const reviewStatus = selectedApp?.status || '검토 필요';
+        // 실제 심사의견서(파란캐피탈 양식) — 담보/재무/채무 표는 백만원, 신청금액은 원.
+        const fmtM = (won?: number | null) => (won ? Math.round(won / 1e6).toLocaleString() : '-');
+        const b = data.borrower_info;
+        const g = data.guarantor_info;
+        const pbi = data.property_basic_info;
+        const loanM = Math.round(loanAmount / 1e6);
+        const fin2 = [...b.financial_data].sort((x, y) => y.year - x.year).slice(0, 2);
+        const overallOpinion = auditorOpinion || data.ai_analysis.auditor_recommendation || '';
+        const productName = '주택 근저당권부 질권대출';
 
         return (
         <div className="modal-overlay" onClick={() => setShowReviewReport(false)}>
@@ -430,337 +431,130 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
             <div className="modal-body">
               <div className="review-report-document">
                 <div className="report-title">
-                  <h3>담보대출 심사의견서</h3>
+                  <h3>㈜{b.company_name} {productName} {loanM.toLocaleString()}백만원 검토</h3>
                   <p className="report-date">작성일: {new Date().toLocaleDateString('ko-KR')}</p>
-                </div>
-
-                {/* 1. 기본 정보 */}
-                <div className="report-section">
-                  <h4>1. 기본 정보</h4>
-                  <table className="report-table">
+                  <table className="report-table" style={{ marginTop: 8 }}>
                     <tbody>
-                      <tr>
-                        <th>대부업체명</th>
-                        <td>{data.borrower_info.company_name}</td>
-                        <th>사업자등록번호</th>
-                        <td>{data.borrower_info.business_number}</td>
-                      </tr>
-                      <tr>
-                        <th>담보물건 주소</th>
-                        <td colSpan={3}>{data.property_basic_info.address}</td>
-                      </tr>
-                      <tr>
-                        <th>전용면적</th>
-                        <td>{data.property_basic_info.area != null ? `${data.property_basic_info.area}평` : "N/A"}</td>
-                        <th>세대수</th>
-                        <td>{data.property_basic_info.units != null ? `${data.property_basic_info.units.toLocaleString()}세대` : "N/A"}</td>
-                      </tr>
-                      <tr>
-                        <th>경과연수</th>
-                        <td>{data.property_basic_info.age != null ? `${data.property_basic_info.age}년` : "N/A"}</td>
-                        <th></th>
-                        <td></td>
-                      </tr>
-                      <tr>
-                        <th>입지점수</th>
-                        <td>{data.property_basic_info.location_score != null ? `${data.property_basic_info.location_score}점` : "N/A"}</td>
-                        <th>대출신청금액</th>
-                        <td>{formatAmount(loanAmount)}</td>
-                      </tr>
+                      <tr><th>전결권자</th><td></td><th>검토자</th><td>{user.ceo_name || user.user_id}</td></tr>
                     </tbody>
                   </table>
                 </div>
 
-                {/* 2. 차주(대부업체) 재무 정보 — 외부 신용평가 미연동, 더미 유지 */}
+                {/* 1. 여신개요 */}
                 <div className="report-section">
-                  <h4>2. 차주 재무 정보 (최근 3개년)</h4>
+                  <h4>1. 여신개요</h4>
+                  <div className="report-opinion-box">본 건은 ㈜{b.company_name}의 근저당권부 질권대출 신청건임.</div>
+                </div>
+
+                {/* 2. 신청현황 */}
+                <div className="report-section">
+                  <h4>2. 신청현황 <span style={{ fontWeight: 400, fontSize: 12, color: '#888' }}>[단위:원]</span></h4>
+                  <table className="report-table">
+                    <tbody>
+                      <tr><th>대출상품</th><td>{productName}</td><th>차주명</th><td>㈜{b.company_name}</td></tr>
+                      <tr><th>설정순위</th><td></td><th>상환방식</th><td></td></tr>
+                      <tr><th>대출기간</th><td>{loanDuration}개월</td><th>대출금리</th><td>{interestRate != null ? `${interestRate}%` : ''}</td></tr>
+                      <tr><th>대출금액</th><td>{loanAmount.toLocaleString()}</td><th>자금용도</th><td></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* 3. 담보개요 */}
+                <div className="report-section">
+                  <h4>3. 담보개요 <span style={{ fontWeight: 400, fontSize: 12, color: '#888' }}>[단위:백만원]</span></h4>
                   <table className="report-table">
                     <thead>
-                      <tr>
-                        <th>연도</th>
-                        <th>총자산</th>
-                        <th>총부채</th>
-                        <th>자기자본</th>
-                        <th>매출액</th>
-                        <th>영업이익</th>
-                      </tr>
+                      <tr><th>NO</th><th>물건지 주소</th><th>면적(㎡)</th><th>KB시세</th><th>선순위 임차</th><th>선순위 근저당</th><th>대출금액</th><th>LTV</th></tr>
                     </thead>
                     <tbody>
-                      {data.borrower_info.financial_data.map((f) => (
+                      <tr>
+                        <td>1</td>
+                        <td>{pbi.complex_name ? `${pbi.address} ${pbi.complex_name}` : pbi.address}</td>
+                        <td>{pbi.exclusive_m2 ?? ''}</td>
+                        <td>{fmtM(kb.estimated)}</td>
+                        <td>{fmtM(ri.tenant_deposit)}</td>
+                        <td>{fmtM(ri.max_bond_amount)}</td>
+                        <td>{loanM.toLocaleString()}</td>
+                        <td>{ltvCurrent}%</td>
+                      </tr>
+                      <tr><th colSpan={6} style={{ textAlign: 'right' }}>총 계</th><td>{loanM.toLocaleString()}</td><td></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* 4. 채무관계인 채무자 현황 */}
+                <div className="report-section">
+                  <h4>4. 채무관계인 채무자 현황 <span style={{ fontWeight: 400, fontSize: 12, color: '#888' }}>[단위:백만원]</span></h4>
+                  <table className="report-table">
+                    <tbody>
+                      <tr><th>사업자명</th><td>㈜{b.company_name}</td><th>사업자번호</th><td>{b.business_number || ''}</td></tr>
+                      <tr><th>대표자명</th><td>{b.ceo_name || ''}</td><th>설립일자</th><td></td></tr>
+                      <tr><th>주요주주현황</th><td></td><th>소재지</th><td></td></tr>
+                    </tbody>
+                  </table>
+                  <table className="report-table" style={{ marginTop: 8 }}>
+                    <thead>
+                      <tr><th>재무상태</th><th>자산</th><th>부채</th><th>자본총계</th><th>자본금</th><th>매출액</th><th>영업이익</th><th>당기순이익</th></tr>
+                    </thead>
+                    <tbody>
+                      {fin2.length > 0 ? fin2.map((f) => (
                         <tr key={f.year}>
-                          <td>{f.year}년</td>
-                          <td>{formatAmount(f.assets)}</td>
-                          <td>{formatAmount(f.liabilities)}</td>
-                          <td>{formatAmount(f.equity)}</td>
-                          <td>{formatAmount(f.revenue)}</td>
-                          <td>{formatAmount(f.operating_profit)}</td>
+                          <td>{String(f.year).slice(2)}.12.31</td>
+                          <td>{fmtM(f.assets)}</td><td>{fmtM(f.liabilities)}</td><td>{fmtM(f.equity)}</td>
+                          <td></td>
+                          <td>{fmtM(f.revenue)}</td><td>{fmtM(f.operating_profit)}</td><td>{fmtM(f.net_income)}</td>
                         </tr>
-                      ))}
+                      )) : (<tr><td>-</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>)}
+                    </tbody>
+                  </table>
+                  <table className="report-table" style={{ marginTop: 8 }}>
+                    <thead><tr><th>보유채무</th><th>금융업권</th><th>잔액</th><th>비고</th></tr></thead>
+                    <tbody>
+                      <tr><th>직접채무</th><td>당 사</td><td>{fmtM(b.direct_debt)}</td><td>질권대출</td></tr>
+                      <tr><th>보증채무</th><td>당 사</td><td>{fmtM(b.guarantee_debt)}</td><td></td></tr>
                     </tbody>
                   </table>
                 </div>
 
-                {/* 3. 연대보증인 — 등기부 소유자 정보 활용 */}
+                {/* 5. 채무관계인 연대보증인 현황 */}
                 <div className="report-section">
-                  <h4>3. 연대보증인(담보제공자) 정보</h4>
+                  <h4>5. 채무관계인 연대보증인 현황 <span style={{ fontWeight: 400, fontSize: 12, color: '#888' }}>[단위:백만원]</span></h4>
                   <table className="report-table">
                     <tbody>
-                      <tr>
-                        <th>성명</th>
-                        <td>{ri.ownership_entries?.[0]?.name || '-'}</td>
-                        <th>최종지분</th>
-                        <td>{ri.ownership_entries?.[0]?.share || '-'}</td>
-                      </tr>
-                      <tr>
-                        <th>주소</th>
-                        <td colSpan={3}>{ri.ownership_entries?.[0]?.address || '-'}</td>
-                      </tr>
+                      <tr><th>성명</th><td>{g.name || ''}</td><th>생년월일</th><td></td></tr>
+                      <tr><th>채무자관계</th><td>{g.name && g.name === b.ceo_name ? '대표' : ''}</td><th>NICE</th><td>{g.credit_score_nice ?? ''}</td></tr>
+                    </tbody>
+                  </table>
+                  <table className="report-table" style={{ marginTop: 8 }}>
+                    <thead><tr><th>보유채무</th><th>금융업권</th><th>잔액</th><th>비고</th></tr></thead>
+                    <tbody>
+                      <tr><th>직접채무</th><td></td><td>{fmtM(g.direct_debt)}</td><td></td></tr>
+                      <tr><th>보증채무</th><td>당 사</td><td>{fmtM(g.guarantee_debt)}</td><td></td></tr>
                     </tbody>
                   </table>
                 </div>
 
-                {/* 4. 등기 권리관계 */}
+                {/* 6. 영업부서 의견 */}
                 <div className="report-section">
-                  <h4>4. 등기 권리관계</h4>
+                  <h4>6. 영업부서 의견</h4>
                   <table className="report-table">
                     <tbody>
-                      <tr>
-                        <th>소유자</th>
-                        <td colSpan={3}>{ri.ownership_entries?.[0]?.name ?? '-'} ({ri.ownership_entries?.[0]?.share ?? '-'})</td>
-                      </tr>
-                      <tr>
-                        <th>을구 (근저당)</th>
-                        <td colSpan={3}>
-                          {ri.mortgage_entries?.map((m: { rank_number: string; purpose: string; main_details: string }, i: number) => (
-                            <div key={i}>{m.rank_number}. {m.purpose} - {m.main_details.split('\n')[0]}</div>
-                          ))}
-                        </td>
-                      </tr>
-                      <tr>
-                        <th>선순위 채권최고액</th>
-                        <td>{formatAmount(ri.max_bond_amount)}</td>
-                        <th>선순위 임차보증금</th>
-                        <td>{formatAmount(ri.tenant_deposit)}</td>
-                      </tr>
-                      {ri.ownership_other_entries?.length > 0 && (
-                        <tr className="warning-row">
-                          <th>특이사항</th>
-                          <td colSpan={3} className="warning">
-                            {ri.ownership_other_entries.map((e: { purpose: string; details: string }, i: number) => (
-                              <div key={i}>{e.purpose}: {e.details.split('\n')[0]}</div>
-                            ))}
-                          </td>
-                        </tr>
-                      )}
+                      <tr><th>담보</th><td>KB시세 {fmtM(kb.estimated)}백만원 / 최근실거래가 {fmtM(molit.recent_price)}백만원{molit.transaction_date ? ` (${molit.transaction_date})` : ''}</td></tr>
                     </tbody>
                   </table>
+                  <div style={{ fontWeight: 700, fontSize: 13, margin: '8px 0 4px' }}>검토의견</div>
+                  <div className="report-opinion-box" style={{ minHeight: 48 }}></div>
                 </div>
 
-                {/* 5. 시세 정보 */}
+                {/* 7. 기업심사팀 의견 */}
                 <div className="report-section">
-                  <h4>5. 시세 정보</h4>
-                  <table className="report-table">
-                    <thead>
-                      <tr>
-                        <th>구분</th>
-                        <th>시세</th>
-                        <th>추세</th>
-                        <th>비고</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>KB 추정가</td>
-                        <td>{formatAmount(kb.estimated)}</td>
-                        <td>{kb.trend}</td>
-                        <td>하한 {formatAmount(kb.low)} ~ 상한 {formatAmount(kb.high)}</td>
-                      </tr>
-                      <tr>
-                        <td>국토부 실거래가</td>
-                        <td>{formatAmount(molit.recent_price)}</td>
-                        <td>{molit.trend}</td>
-                        <td>거래일 {molit.transaction_date}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 6. 산출 LTV */}
-                <div className="report-section">
-                  <h4>6. 산출 LTV</h4>
-                  <table className="report-table">
-                    <tbody>
-                      <tr>
-                        <th>① 선순위 근저당권</th>
-                        <td>{formatAmount(ri.max_bond_amount)}</td>
-                        <th>② 선순위 임차인</th>
-                        <td>{formatAmount(ri.tenant_deposit)}</td>
-                      </tr>
-                      <tr>
-                        <th>③ 대출신청금액</th>
-                        <td>{formatAmount(loanAmount)}</td>
-                        <th>합계 (①+②+③)</th>
-                        <td style={{fontWeight:700}}>{formatAmount(totalPrior)}</td>
-                      </tr>
-                      <tr>
-                        <th>현재 시세 기준 LTV</th>
-                        <td>{ltvCurrent}% (KB 추정가 {formatAmount(kb.estimated)})</td>
-                        <th>JB 적정시세 기준 LTV</th>
-                        <td>{ltvJB}% (JB 적정 {formatAmount(jbFair)})</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 7. 입지 분석 점수 — 내부망(cs) 5축 우선, 외부(ls) 6축 */}
-                {cs ? (
-                <div className="report-section">
-                  <h4>7. AI 단지·입지 분석 점수{cs.is_mixed_use ? ' (주상복합)' : ''}</h4>
-                  <table className="report-table score-table">
-                    <thead>
-                      <tr>
-                        <th>단지 규모</th>
-                        <th>연식</th>
-                        <th>주차 편의</th>
-                        <th>시세 안정성</th>
-                        <th>단지 위상</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>{cs.scale}점</td>
-                        <td>{cs.age}점</td>
-                        <td>{cs.parking}점</td>
-                        <td>{cs.price_stability}점</td>
-                        <td>{cs.landmark}점</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                ) : ls && (
-                <div className="report-section">
-                  <h4>7. AI 입지 분석 점수</h4>
-                  <table className="report-table score-table">
-                    <thead>
-                      <tr>
-                        <th>역세권</th>
-                        <th>노선 다양성</th>
-                        <th>단지 규모</th>
-                        <th>학군</th>
-                        <th>생활환경</th>
-                        <th>자연환경</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>{ls.station_walk}점</td>
-                        <td>{ls.commute_time}점</td>
-                        <td>{ls.units_score}점</td>
-                        <td>{ls.school_walk}점</td>
-                        <td>{ls.living_env}점</td>
-                        <td>{ls.nature_env}점</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                )}
-
-                {/* 8. 인근 유사물건 동향 */}
-                {nearbyProps.length > 0 && (
-                <div className="report-section">
-                  <h4>8. 인근 유사물건 동향</h4>
-                  <table className="report-table">
-                    <thead>
-                      <tr>
-                        <th>단지명</th>
-                        <th>세대수</th>
-                        <th>연식</th>
-                        <th>면적</th>
-                        <th>최근 거래가</th>
-                        <th>3개월 변동률</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {nearbyProps.map((p, i) => (
-                        <tr key={i}>
-                          <td>{p.name}</td>
-                          <td>{p.units}세대</td>
-                          <td>{p.age}년</td>
-                          <td>{p.area}평</td>
-                          <td>{formatAmount(p.recent_price)}</td>
-                          <td style={{color: p.price_change_rate >= 0 ? '#20c997' : '#EF5350'}}>
-                            {(p.price_change_rate * 100).toFixed(1)}%
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                )}
-
-                {/* 9. 평단가 추이 */}
-                {pyeongData.length > 0 && (
-                <div className="report-section">
-                  <h4>9. 단지/읍면동/시군구 평단가 추이</h4>
-                  <table className="report-table">
-                    <thead>
-                      <tr>
-                        <th>월</th>
-                        <th>{data.price_per_pyeong_trend?.complex_name || '단지'} (만원/평)</th>
-                        <th>{data.price_per_pyeong_trend?.dong_name || '읍면동'} (만원/평)</th>
-                        <th>{data.price_per_pyeong_trend?.sigungu_name || '시군구'} (만원/평)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pyeongData.map((d, i) => (
-                        <tr key={i}>
-                          <td>{d.date}</td>
-                          <td>{d.complex.toLocaleString()}</td>
-                          <td>{d.dong.toLocaleString()}</td>
-                          <td>{d.sigungu.toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                )}
-
-                {/* 10. AI 종합 의견 */}
-                <div className="report-section">
-                  <h4>10. AI 종합 의견</h4>
-                  <div className="report-opinion-box">
-                    {data.ai_analysis.comprehensive_opinion || '(AI 종합 의견 없음)'}
-                  </div>
-                </div>
-
-                {/* 11. 심사역 종합 의견 */}
-                <div className="report-section">
-                  <h4>11. 심사역 종합 의견</h4>
-                  <div className="report-opinion-box">
-                    {auditorOpinion || '(의견 미입력)'}
-                  </div>
-                </div>
-
-                {/* 12. 심사 결과 */}
-                <div className="report-section">
-                  <h4>12. 심사 결과</h4>
-                  <div
-                    className={`report-result ${reviewStatus === '승인' ? 'approved' : ''}`}
-                    style={{
-                      background:
-                        reviewStatus === '승인' ? '#e6f9f0' :
-                        reviewStatus === '반려' ? '#FEE2E2' :
-                        reviewStatus === '심사중' ? '#FEF3C7' :
-                        '#F1F5F9',
-                      color:
-                        reviewStatus === '승인' ? '#20c997' :
-                        reviewStatus === '반려' ? '#991B1B' :
-                        reviewStatus === '심사중' ? '#92400E' :
-                        '#475569',
-                    }}
-                  >
-                    {reviewStatus}
-                  </div>
+                  <h4>7. 기업심사팀 의견</h4>
+                  <div style={{ fontWeight: 700, fontSize: 13, margin: '8px 0 4px' }}>긍정의견</div>
+                  <div className="report-opinion-box" style={{ minHeight: 36 }}></div>
+                  <div style={{ fontWeight: 700, fontSize: 13, margin: '8px 0 4px' }}>부정의견</div>
+                  <div className="report-opinion-box" style={{ minHeight: 36 }}></div>
+                  <div style={{ fontWeight: 700, fontSize: 13, margin: '8px 0 4px' }}>종합의견</div>
+                  <div className="report-opinion-box" style={{ minHeight: 48 }}>{overallOpinion}</div>
                 </div>
 
                 <div className="report-footer">
