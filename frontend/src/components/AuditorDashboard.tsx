@@ -432,10 +432,13 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
               <div className="review-report-document">
                 <div className="report-title">
                   <h3>㈜{b.company_name} {productName} {loanM.toLocaleString()}백만원 검토</h3>
-                  <p className="report-date">작성일: {new Date().toLocaleDateString('ko-KR')}</p>
-                  <table className="report-table" style={{ marginTop: 8 }}>
+                  <p className="report-date">({new Date().toLocaleDateString('ko-KR')})</p>
+                  <table className="report-table report-approval">
                     <tbody>
-                      <tr><th>전결권자</th><td></td><th>검토자</th><td>{user.ceo_name || user.user_id}</td></tr>
+                      <tr>
+                        <th>전결권자</th><td></td>
+                        <th>검토자</th><td>{user.ceo_name || user.user_id}</td><td></td>
+                      </tr>
                     </tbody>
                   </table>
                 </div>
@@ -443,33 +446,49 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                 {/* 1. 여신개요 */}
                 <div className="report-section">
                   <h4>1. 여신개요</h4>
-                  <div className="report-opinion-box">본 건은 ㈜{b.company_name}의 근저당권부 질권대출 신청건임.</div>
+                  <p className="report-line">- 본 건은 ㈜{b.company_name}의 근저당권부 질권대출 신청건임.</p>
                 </div>
 
                 {/* 2. 신청현황 */}
                 <div className="report-section">
-                  <h4>2. 신청현황 <span style={{ fontWeight: 400, fontSize: 12, color: '#888' }}>[단위:원]</span></h4>
+                  <h4>2. 신청현황 <span className="report-unit">[단위:원]</span></h4>
                   <table className="report-table">
                     <tbody>
-                      <tr><th>대출상품</th><td>{productName}</td><th>차주명</th><td>㈜{b.company_name}</td></tr>
-                      <tr><th>설정순위</th><td></td><th>상환방식</th><td></td></tr>
-                      <tr><th>대출기간</th><td>{loanDuration}개월</td><th>대출금리</th><td>{interestRate != null ? `${interestRate}%` : ''}</td></tr>
-                      <tr><th>대출금액</th><td>{loanAmount.toLocaleString()}</td><th>자금용도</th><td></td></tr>
+                      <tr>
+                        <th rowSpan={3} className="report-cat">취급</th>
+                        <th>대출상품</th><td>{productName}</td>
+                        <th>차주명</th><td colSpan={2}>㈜{b.company_name}</td>
+                      </tr>
+                      <tr>
+                        <th>설정순위</th><td></td>
+                        <th>상환방식</th><td></td>
+                        <td>대출기간 / {loanDuration} 개월</td>
+                      </tr>
+                      <tr>
+                        <th>대출금액(원)</th><td>{loanAmount.toLocaleString()}</td>
+                        <td>대출금리 / {interestRate != null ? `${interestRate}%` : ''}</td>
+                        <td colSpan={2}>자금용도 / </td>
+                      </tr>
                     </tbody>
                   </table>
                 </div>
 
                 {/* 3. 담보개요 */}
                 <div className="report-section">
-                  <h4>3. 담보개요 <span style={{ fontWeight: 400, fontSize: 12, color: '#888' }}>[단위:백만원]</span></h4>
+                  <h4>3. 담보개요 <span className="report-unit">[단위:백만원]</span></h4>
                   <table className="report-table">
                     <thead>
-                      <tr><th>NO</th><th>물건지 주소</th><th>면적(㎡)</th><th>KB시세</th><th>선순위 임차</th><th>선순위 근저당</th><th>대출금액</th><th>LTV</th></tr>
+                      <tr>
+                        <th rowSpan={2}>NO</th><th rowSpan={2}>물건지 주소</th><th rowSpan={2}>면적 (㎡)</th><th rowSpan={2}>KB 시세</th>
+                        <th colSpan={2}>선순위</th>
+                        <th rowSpan={2}>대출 금액</th><th rowSpan={2}>LTV</th>
+                      </tr>
+                      <tr><th>임차</th><th>근저당</th></tr>
                     </thead>
                     <tbody>
                       <tr>
                         <td>1</td>
-                        <td>{pbi.complex_name ? `${pbi.address} ${pbi.complex_name}` : pbi.address}</td>
+                        <td className="report-addr">{pbi.address}</td>
                         <td>{pbi.exclusive_m2 ?? ''}</td>
                         <td>{fmtM(kb.estimated)}</td>
                         <td>{fmtM(ri.tenant_deposit)}</td>
@@ -477,22 +496,23 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                         <td>{loanM.toLocaleString()}</td>
                         <td>{ltvCurrent}%</td>
                       </tr>
-                      <tr><th colSpan={6} style={{ textAlign: 'right' }}>총 계</th><td>{loanM.toLocaleString()}</td><td></td></tr>
+                      <tr><th colSpan={6} style={{ textAlign: 'center' }}>총 계</th><td>{loanM.toLocaleString()}</td><td></td></tr>
                     </tbody>
                   </table>
                 </div>
 
                 {/* 4. 채무관계인 채무자 현황 */}
                 <div className="report-section">
-                  <h4>4. 채무관계인 채무자 현황 <span style={{ fontWeight: 400, fontSize: 12, color: '#888' }}>[단위:백만원]</span></h4>
+                  <h4>4. 채무관계인 채무자 현황 <span className="report-unit">[단위:백만원]</span></h4>
                   <table className="report-table">
                     <tbody>
                       <tr><th>사업자명</th><td>㈜{b.company_name}</td><th>사업자번호</th><td>{b.business_number || ''}</td></tr>
                       <tr><th>대표자명</th><td>{b.ceo_name || ''}</td><th>설립일자</th><td></td></tr>
-                      <tr><th>주요주주현황</th><td></td><th>소재지</th><td></td></tr>
+                      <tr><th>주요주주현황</th><td colSpan={3}></td></tr>
+                      <tr><th>소재지</th><td colSpan={3}></td></tr>
                     </tbody>
                   </table>
-                  <table className="report-table" style={{ marginTop: 8 }}>
+                  <table className="report-table" style={{ marginTop: 6 }}>
                     <thead>
                       <tr><th>재무상태</th><th>자산</th><th>부채</th><th>자본총계</th><th>자본금</th><th>매출액</th><th>영업이익</th><th>당기순이익</th></tr>
                     </thead>
@@ -504,32 +524,32 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                           <td></td>
                           <td>{fmtM(f.revenue)}</td><td>{fmtM(f.operating_profit)}</td><td>{fmtM(f.net_income)}</td>
                         </tr>
-                      )) : (<tr><td>-</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>)}
+                      )) : (<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>)}
                     </tbody>
                   </table>
-                  <table className="report-table" style={{ marginTop: 8 }}>
+                  <table className="report-table" style={{ marginTop: 6 }}>
                     <thead><tr><th>보유채무</th><th>금융업권</th><th>잔액</th><th>비고</th></tr></thead>
                     <tbody>
                       <tr><th>직접채무</th><td>당 사</td><td>{fmtM(b.direct_debt)}</td><td>질권대출</td></tr>
-                      <tr><th>보증채무</th><td>당 사</td><td>{fmtM(b.guarantee_debt)}</td><td></td></tr>
+                      <tr><th>총 계</th><td></td><td>{fmtM(b.direct_debt)}</td><td></td></tr>
                     </tbody>
                   </table>
                 </div>
 
                 {/* 5. 채무관계인 연대보증인 현황 */}
                 <div className="report-section">
-                  <h4>5. 채무관계인 연대보증인 현황 <span style={{ fontWeight: 400, fontSize: 12, color: '#888' }}>[단위:백만원]</span></h4>
+                  <h4>5. 채무관계인 연대보증인 현황 <span className="report-unit">[단위:백만원]</span></h4>
                   <table className="report-table">
                     <tbody>
-                      <tr><th>성명</th><td>{g.name || ''}</td><th>생년월일</th><td></td></tr>
-                      <tr><th>채무자관계</th><td>{g.name && g.name === b.ceo_name ? '대표' : ''}</td><th>NICE</th><td>{g.credit_score_nice ?? ''}</td></tr>
+                      <tr><th>성명</th><td>{g.name || ''}</td><th>생년월일</th><td></td><th>채무자관계</th><td>{g.name && g.name === b.ceo_name ? '대표' : ''}</td><th>NICE</th><td>{g.credit_score_nice ?? ''}</td></tr>
                     </tbody>
                   </table>
-                  <table className="report-table" style={{ marginTop: 8 }}>
+                  <table className="report-table" style={{ marginTop: 6 }}>
                     <thead><tr><th>보유채무</th><th>금융업권</th><th>잔액</th><th>비고</th></tr></thead>
                     <tbody>
                       <tr><th>직접채무</th><td></td><td>{fmtM(g.direct_debt)}</td><td></td></tr>
                       <tr><th>보증채무</th><td>당 사</td><td>{fmtM(g.guarantee_debt)}</td><td></td></tr>
+                      <tr><th>총 계</th><td></td><td>{fmtM((g.direct_debt || 0) + (g.guarantee_debt || 0))}</td><td></td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -537,24 +557,22 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                 {/* 6. 영업부서 의견 */}
                 <div className="report-section">
                   <h4>6. 영업부서 의견</h4>
-                  <table className="report-table">
-                    <tbody>
-                      <tr><th>담보</th><td>KB시세 {fmtM(kb.estimated)}백만원 / 최근실거래가 {fmtM(molit.recent_price)}백만원{molit.transaction_date ? ` (${molit.transaction_date})` : ''}</td></tr>
-                    </tbody>
-                  </table>
-                  <div style={{ fontWeight: 700, fontSize: 13, margin: '8px 0 4px' }}>검토의견</div>
-                  <div className="report-opinion-box" style={{ minHeight: 48 }}></div>
+                  <div className="report-opinion-box">
+                    <p className="report-line">- 담보 : KB시세 {fmtM(kb.estimated)}백만원 / 최근실거래가 {fmtM(molit.recent_price)}백만원{molit.transaction_date ? ` (${molit.transaction_date})` : ''}</p>
+                    <p className="report-line">- 검토의견 : </p>
+                  </div>
                 </div>
 
                 {/* 7. 기업심사팀 의견 */}
                 <div className="report-section">
                   <h4>7. 기업심사팀 의견</h4>
-                  <div style={{ fontWeight: 700, fontSize: 13, margin: '8px 0 4px' }}>긍정의견</div>
-                  <div className="report-opinion-box" style={{ minHeight: 36 }}></div>
-                  <div style={{ fontWeight: 700, fontSize: 13, margin: '8px 0 4px' }}>부정의견</div>
-                  <div className="report-opinion-box" style={{ minHeight: 36 }}></div>
-                  <div style={{ fontWeight: 700, fontSize: 13, margin: '8px 0 4px' }}>종합의견</div>
-                  <div className="report-opinion-box" style={{ minHeight: 48 }}>{overallOpinion}</div>
+                  <table className="report-table">
+                    <tbody>
+                      <tr><th className="report-cat">긍정의견</th><td className="report-opinion-cell"></td></tr>
+                      <tr><th className="report-cat">부정의견</th><td className="report-opinion-cell"></td></tr>
+                      <tr><th className="report-cat">종합의견</th><td className="report-opinion-cell">{overallOpinion}</td></tr>
+                    </tbody>
+                  </table>
                 </div>
 
                 <div className="report-footer">
