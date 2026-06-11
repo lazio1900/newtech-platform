@@ -8,7 +8,7 @@ const NONE = '정보 없음';
 
 const cell = (v: number | null | undefined): string => {
   if (v == null) return '-';
-  return `${(v / 100000000).toFixed(0)}억`;
+  return `${(v / 100000000).toFixed(2)}억`;
 };
 
 export default function BorrowerInfo({ data }: BorrowerInfoProps) {

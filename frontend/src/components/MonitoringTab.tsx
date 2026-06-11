@@ -132,7 +132,7 @@ export default function MonitoringTab() {
 
   const formatAmount = (value: number | undefined | null): string => {
     if (!value) return '-';
-    return `${(value / 100000000).toFixed(1)}억원`;
+    return `${(value / 100000000).toFixed(2)}억원`;
   };
 
   const getSignalStyle = (signal: string): React.CSSProperties => {

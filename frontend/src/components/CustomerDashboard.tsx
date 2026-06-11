@@ -472,7 +472,7 @@ export default function CustomerDashboard({ user, onLogout }: CustomerDashboardP
 
   const formatAmount = (value: number): string => {
     if (!value) return '-';
-    return `${(value / 100000000).toFixed(1)}억원`;
+    return `${(value / 100000000).toFixed(2)}억원`;
   };
 
   return (

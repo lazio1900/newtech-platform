@@ -22,11 +22,7 @@ export default function LtvCalculation({ rightsData, creditData, loanAmount, int
 
   const formatEok = (value: number): string => {
     if (!value) return '0원';
-    const eok = value / 100000000;
-    if (eok >= 1) {
-      return eok % 1 === 0 ? `${eok.toFixed(0)}억원` : `${eok.toFixed(1)}억원`;
-    }
-    return `${(value / 10000).toLocaleString()}만원`;
+    return `${(value / 100000000).toFixed(2)}억원`;
   };
 
   const getLtvColor = (ltv: number): string => {

@@ -16,13 +16,7 @@ export default function NearbyPropertyList({ data }: NearbyPropertyListProps) {
     );
   }
 
-  const formatPrice = (value: number): string => {
-    const eok = value / 100000000;
-    if (eok >= 1) {
-      return eok % 1 === 0 ? `${eok.toFixed(0)}억` : `${eok.toFixed(1)}억`;
-    }
-    return `${(value / 10000).toLocaleString()}만`;
-  };
+  const formatPrice = (value: number): string => `${(value / 100000000).toFixed(2)}억`;
 
   const fmtDist = (m: number | null | undefined) =>
     m == null ? '-' : m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m}m`;

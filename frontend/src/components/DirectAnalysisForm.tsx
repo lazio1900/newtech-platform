@@ -755,7 +755,7 @@ export default function DirectAnalysisForm({
             </div>
             {amount && Number(amount) > 0 && (
               <div className="daf-amount-eok">
-                = {(Number(amount) / 1e8).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}억원
+                = {(Number(amount) / 1e8).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}억원
               </div>
             )}
           </div>

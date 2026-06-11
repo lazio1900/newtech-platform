@@ -35,7 +35,7 @@ export default function NearbyPropertyMap({ data, targetAddress }: NearbyPropert
     );
   }
 
-  const formatPrice = (value: number): string => `${(value / 100000000).toFixed(1)}억`;
+  const formatPrice = (value: number): string => `${(value / 100000000).toFixed(2)}억`;
   const formatRate = (rate: number): string => {
     const pct = (rate * 100).toFixed(1);
     return rate >= 0 ? `+${pct}%` : `${pct}%`;

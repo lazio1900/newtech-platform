@@ -9,7 +9,7 @@ export default function CreditSources({ data }: CreditSourcesProps) {
 
   const formatPrice = (price: number | null | undefined): string => {
     if (price == null) return '데이터 없음';
-    return `${(price / 100000000).toFixed(1)}억원`;
+    return `${(price / 100000000).toFixed(2)}억원`;
   };
 
   const molit = data.molit_transactions;

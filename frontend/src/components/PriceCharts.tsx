@@ -65,7 +65,7 @@ const JbTooltip = ({ active, payload }: JbTooltipProps) => {
   );
 };
 
-const formatPrice = (value: number): string => `${(value / 100000000).toFixed(1)}억`;
+const formatPrice = (value: number): string => `${(value / 100000000).toFixed(2)}억`;
 
 const CustomTooltip = ({ active, payload }: TooltipProps) => {
   if (!active || !payload || !payload.length) return null;

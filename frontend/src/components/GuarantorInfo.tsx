@@ -8,7 +8,7 @@ const NONE = '정보 없음';
 
 const formatAmount = (amount: number | null | undefined): string => {
   if (amount == null) return NONE;
-  return `${(amount / 100000000).toFixed(1)}억원`;
+  return `${(amount / 100000000).toFixed(2)}억원`;
 };
 
 export default function GuarantorInfo({ data }: GuarantorInfoProps) {
