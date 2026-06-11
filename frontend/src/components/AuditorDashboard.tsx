@@ -421,7 +421,6 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
         // INTERNAL_ONLY: 시세 없으면 확인 불가 → 0/빈값으로 표시(보고서는 '-' 처리됨)
         const kb = data.credit_data?.kb_price ?? { estimated: 0, high: 0, low: 0, trend: '-', history: [] };
         const molit = data.credit_data?.molit_transactions ?? { recent_price: null, transaction_date: null, trend: '-', history: [] };
-        const naver = data.credit_data?.naver_listings ?? { avg_asking: null, listing_count: 0, trend: '-', history: [] };
         const jbFair = data.credit_data?.jb_fair_price ?? kb.low;
         const ls = data.ai_analysis.location_scores;
         const cs = data.ai_analysis.complex_scores;
@@ -593,12 +592,6 @@ export default function AuditorDashboard({ user, onLogout }: AuditorDashboardPro
                         <td>{formatAmount(molit.recent_price)}</td>
                         <td>{molit.trend}</td>
                         <td>거래일 {molit.transaction_date}</td>
-                      </tr>
-                      <tr>
-                        <td>네이버 매매호가</td>
-                        <td>{formatAmount(naver.avg_asking)}</td>
-                        <td>{naver.trend}</td>
-                        <td>매물 {naver.listing_count}건</td>
                       </tr>
                     </tbody>
                   </table>

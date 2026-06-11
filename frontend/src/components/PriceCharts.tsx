@@ -294,36 +294,6 @@ export default function PriceCharts({ data }: PriceChartsProps) {
           </ResponsiveContainer>
         </div>
 
-        <div className="chart-box">
-          <h4>부동산 매매호가 추이</h4>
-          <ResponsiveContainer width="100%" height={200}>
-            <ScatterChart>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
-              <XAxis
-                dataKey="ts"
-                type="number"
-                domain={[startTs, endTs]}
-                ticks={monthlyTicks}
-                tickFormatter={xTickFormatter}
-                tick={{ fontSize: 10 }}
-                allowDataOverflow
-              />
-              <YAxis
-                dataKey="price"
-                domain={[sharedYMin, sharedYMax]}
-                tickFormatter={formatPrice}
-                tick={{ fontSize: 10 }}
-                width={60}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              <Scatter
-                data={naverData}
-                fill="#051C48"
-                name="매매호가"
-              />
-            </ScatterChart>
-          </ResponsiveContainer>
-        </div>
       </div>
 
       {/* JB 적정시세 추이 + 향후 3개월 예측 (1단계: 동적 가중치 + IQR + 80% 신뢰구간) */}

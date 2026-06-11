@@ -13,7 +13,6 @@ export default function CreditSources({ data }: CreditSourcesProps) {
   };
 
   const molit = data.molit_transactions;
-  const naver = data.naver_listings;
 
   return (
     <div className="credit-sources">
@@ -38,17 +37,6 @@ export default function CreditSources({ data }: CreditSourcesProps) {
             {molit.transaction_date && <span className="date">{molit.transaction_date}</span>}
           </div>
           <span className="trend">{molit.trend}</span>
-        </div>
-      </div>
-
-      <div className="credit-box">
-        <h4>최신 부동산 매매호가</h4>
-        <div className="credit-content">
-          <div className="price-info">
-            <span className="main-price">{formatPrice(naver.avg_asking)}</span>
-            <span className="listing-count">매물 {naver.listing_count}건</span>
-          </div>
-          <span className="trend">{naver.trend}</span>
         </div>
       </div>
     </div>
