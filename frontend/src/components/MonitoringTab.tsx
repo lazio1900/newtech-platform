@@ -8,7 +8,6 @@ import './MonitoringTab.css';
 export default function MonitoringTab() {
   const [loans, setLoans] = useState<MonitoringLoan[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [reevaluating, setReevaluating] = useState<boolean>(false);
   const [selectedLoan, setSelectedLoan] = useState<MonitoringLoan | null>(null);
   const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
   const [detailData, setDetailData] = useState<AnalysisResponse | null>(null);
@@ -42,18 +41,6 @@ export default function MonitoringTab() {
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleReevaluate = async () => {
-    setReevaluating(true);
-    try {
-      const data = await reevaluateAllMonitoring();
-      setLoans(data.loans);
-    } catch (err) {
-      console.error('재평가 실패:', err);
-    } finally {
-      setReevaluating(false);
     }
   };
 
@@ -189,9 +176,6 @@ export default function MonitoringTab() {
             {lastEvaluated && (
               <span className="monitoring-last-eval">최근 재평가 {lastEvaluated}</span>
             )}
-            <button className="reevaluate-btn" onClick={handleReevaluate} disabled={reevaluating || loading}>
-              {reevaluating ? '재평가 중…' : '시세 재평가'}
-            </button>
             <span className="monitoring-count">
               {hasActiveFilters
                 ? `${processedLoans.length} / ${loans.length}건`

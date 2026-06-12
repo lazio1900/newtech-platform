@@ -75,29 +75,6 @@
   color: #999999;
 }
 
-.reevaluate-btn {
-  padding: 7px 14px;
-  border: 1px solid #006FBD;
-  border-radius: 6px;
-  background-color: #FFFFFF;
-  color: #006FBD;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.reevaluate-btn:hover:not(:disabled) {
-  background-color: #006FBD;
-  color: #FFFFFF;
-}
-
-.reevaluate-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
 /* 필터 바 */
 .monitoring-filters {
   display: flex;
