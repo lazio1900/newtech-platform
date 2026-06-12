@@ -301,6 +301,7 @@ export default function MonitoringTab() {
           )}
         </div>
 
+        <div className="monitoring-table-scroll">
         <table className="monitoring-table">
           <thead>
             <tr>
@@ -371,6 +372,7 @@ export default function MonitoringTab() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* 상세심사 팝업 — 신청목록>상세심사와 동일 분석 화면 */}

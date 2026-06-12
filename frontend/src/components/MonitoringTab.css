@@ -48,6 +48,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   margin-bottom: 16px;
 }
 
@@ -67,7 +69,8 @@
 .monitoring-header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 
 .monitoring-last-eval {
@@ -83,6 +86,7 @@
   color: #006FBD;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color 0.15s, color 0.15s;
 }
@@ -100,6 +104,7 @@
 /* 필터 바 */
 .monitoring-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   align-items: flex-end;
   margin-bottom: 16px;
@@ -188,8 +193,13 @@
   font-size: 14px;
 }
 
+.monitoring-table-scroll {
+  overflow-x: auto;
+}
+
 .monitoring-table {
   width: 100%;
+  min-width: 900px;
   border-collapse: collapse;
   font-size: 13px;
 }
