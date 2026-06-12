@@ -21,13 +21,12 @@ export default function MonitoringTab() {
   // 필터
   const [filterAuditor, setFilterAuditor] = useState<string>('');
   const [filterCompany, setFilterCompany] = useState<string>('');
-  const [filterSignal, setFilterSignal] = useState<string>('');
 
   useEffect(() => {
     void initLoad();
   }, []);
 
-  // 진입 시 최신 시세로 재평가 후 표시 (현재 LTV/신호등이 실시간 반영되도록)
+  // 진입 시 최신 시세로 재평가 후 표시 (현재 LTV가 실시간 반영되도록)
   const initLoad = async () => {
     setLoading(true);
     try {
@@ -78,9 +77,8 @@ export default function MonitoringTab() {
     let result = loans;
     if (filterAuditor) result = result.filter(l => l.auditor_name === filterAuditor);
     if (filterCompany) result = result.filter(l => l.company_name === filterCompany);
-    if (filterSignal) result = result.filter(l => l.signal === filterSignal);
     return result;
-  }, [loans, filterAuditor, filterCompany, filterSignal]);
+  }, [loans, filterAuditor, filterCompany]);
 
   // 상단 요약 — 필터 적용된 행 기준으로 재계산
   const summary: MonitoringSummary = useMemo(() => {
@@ -133,12 +131,11 @@ export default function MonitoringTab() {
     return result;
   }, [filteredLoans, sortKey, sortDir]);
 
-  const hasActiveFilters = filterAuditor || filterCompany || filterSignal;
+  const hasActiveFilters = filterAuditor || filterCompany;
 
   const clearFilters = () => {
     setFilterAuditor('');
     setFilterCompany('');
-    setFilterSignal('');
   };
 
   const handleLoanClick = async (loan: MonitoringLoan) => {
@@ -178,38 +175,6 @@ export default function MonitoringTab() {
     return `${(value / 100000000).toFixed(2)}억원`;
   };
 
-  const getSignalStyle = (signal: string): React.CSSProperties => {
-    const colors: Record<string, { bg: string; color: string; border: string }> = {
-      green: { bg: '#E8F5E9', color: '#2E7D32', border: '#4CAF50' },
-      yellow: { bg: '#FFF8E1', color: '#F57F17', border: '#FFC107' },
-      red: { bg: '#FFEBEE', color: '#C62828', border: '#EF5350' }
-    };
-    const c = colors[signal] || colors.green;
-    return {
-      backgroundColor: c.bg,
-      color: c.color,
-      border: `2px solid ${c.border}`,
-      padding: '4px 12px',
-      borderRadius: '16px',
-      fontSize: '12px',
-      fontWeight: '700',
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '4px'
-    };
-  };
-
-  const getSignalDot = (signal: string) => {
-    const colors: Record<string, string> = { green: '#4CAF50', yellow: '#FFC107', red: '#EF5350' };
-    return (
-      <span style={{
-        width: 10, height: 10, borderRadius: '50%',
-        backgroundColor: colors[signal] || '#999',
-        display: 'inline-block'
-      }} />
-    );
-  };
-
   const getLtvChangeDisplay = (change: number): string => {
     if (change > 0) return `+${change}%p`;
     return `${change}%p`;
@@ -217,35 +182,6 @@ export default function MonitoringTab() {
 
   return (
     <div className="monitoring-tab">
-      {/* 요약 카드 — 필터 반영 */}
-      <div className="monitoring-summary">
-        <div className="summary-card total">
-          <span className="summary-label">총 관리 건수</span>
-          <span className="summary-value">{summary.total_count}건</span>
-        </div>
-        <div className="summary-card green">
-          <span className="summary-label">안전</span>
-          <span className="summary-value">{summary.green_count}건</span>
-        </div>
-        <div className="summary-card yellow">
-          <span className="summary-label">주의</span>
-          <span className="summary-value">{summary.yellow_count}건</span>
-        </div>
-        <div className="summary-card red">
-          <span className="summary-label">위험</span>
-          <span className="summary-value">{summary.red_count}건</span>
-        </div>
-        <div className="summary-card amount">
-          <span className="summary-label">총 대출 잔액</span>
-          <span className="summary-value">{formatAmount(summary.total_amount)}</span>
-        </div>
-        <div className="summary-card ltv">
-          <span className="summary-label">평균 현재 LTV</span>
-          <span className="summary-value">{summary.avg_current_ltv}%</span>
-        </div>
-      </div>
-
-      {/* 대출 목록 테이블 */}
       <div className="monitoring-table-card">
         <div className="monitoring-table-header">
           <h2>취급 대출 사후모니터링</h2>
@@ -265,7 +201,7 @@ export default function MonitoringTab() {
           </div>
         </div>
 
-        {/* 필터 바 */}
+        {/* 필터 바 — 카드·표 전체에 적용 */}
         <div className="monitoring-filters">
           <div className="filter-group">
             <label>담당자</label>
@@ -285,15 +221,6 @@ export default function MonitoringTab() {
               ))}
             </select>
           </div>
-          <div className="filter-group">
-            <label>상태</label>
-            <select value={filterSignal} onChange={(e) => setFilterSignal(e.target.value)}>
-              <option value="">전체</option>
-              <option value="green">안전</option>
-              <option value="yellow">주의</option>
-              <option value="red">위험</option>
-            </select>
-          </div>
           {hasActiveFilters && (
             <button className="filter-clear-btn" onClick={clearFilters}>
               필터 초기화
@@ -301,6 +228,23 @@ export default function MonitoringTab() {
           )}
         </div>
 
+        {/* 요약 카드 — 필터 반영 */}
+        <div className="monitoring-summary">
+          <div className="summary-card total">
+            <span className="summary-label">총 관리 건수</span>
+            <span className="summary-value">{summary.total_count}건</span>
+          </div>
+          <div className="summary-card amount">
+            <span className="summary-label">총 대출 잔액</span>
+            <span className="summary-value">{formatAmount(summary.total_amount)}</span>
+          </div>
+          <div className="summary-card ltv">
+            <span className="summary-label">평균 현재 LTV</span>
+            <span className="summary-value">{summary.avg_current_ltv}%</span>
+          </div>
+        </div>
+
+        {/* 표 */}
         <div className="monitoring-table-scroll">
         <table className="monitoring-table">
           <thead>
@@ -330,15 +274,12 @@ export default function MonitoringTab() {
               <th className="sortable-th" onClick={() => handleSort('ltv_change')}>
                 LTV 변동 {getSortIndicator('ltv_change')}
               </th>
-              <th className="sortable-th" onClick={() => handleSort('signal')}>
-                상태 {getSortIndicator('signal')}
-              </th>
             </tr>
           </thead>
           <tbody>
             {processedLoans.length === 0 ? (
               <tr>
-                <td colSpan={10} className="empty-table-text">
+                <td colSpan={9} className="empty-table-text">
                   {loading ? '불러오는 중입니다…' : hasActiveFilters ? '필터 조건에 해당하는 데이터가 없습니다.' : '데이터가 없습니다.'}
                 </td>
               </tr>
@@ -357,15 +298,9 @@ export default function MonitoringTab() {
                   <td>{formatAmount(loan.loan_amount)}</td>
                   <td>{loan.execution_date}</td>
                   <td>{loan.execution_ltv}%</td>
-                  <td className={`ltv-cell ${loan.signal}`}>{loan.current_ltv}%</td>
+                  <td className="ltv-cell">{loan.current_ltv}%</td>
                   <td className={`ltv-change ${loan.ltv_change > 0 ? 'up' : loan.ltv_change < 0 ? 'down' : ''}`}>
                     {getLtvChangeDisplay(loan.ltv_change)}
-                  </td>
-                  <td>
-                    <span style={getSignalStyle(loan.signal)}>
-                      {getSignalDot(loan.signal)}
-                      {loan.signal_label}
-                    </span>
                   </td>
                 </tr>
               ))
@@ -416,14 +351,7 @@ export default function MonitoringTab() {
               </div>
               <div className="loan-summary-item">
                 <span className="ls-label">현재 LTV</span>
-                <span className={`ls-value ${selectedLoan.signal}`}>{selectedLoan.current_ltv}%</span>
-              </div>
-              <div className="loan-summary-item">
-                <span className="ls-label">상태</span>
-                <span style={getSignalStyle(selectedLoan.signal)}>
-                  {getSignalDot(selectedLoan.signal)}
-                  {selectedLoan.signal_label}
-                </span>
+                <span className="ls-value">{selectedLoan.current_ltv}%</span>
               </div>
             </div>
 
