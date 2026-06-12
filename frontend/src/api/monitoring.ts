@@ -17,8 +17,17 @@ export const addMonitoringLoan = async (loanData: {
   property_address: string;
   loan_amount: number;
   execution_price: number;
+  application_id?: string | null;
+  complex_id?: number | null;
+  area_id?: number | null;
+  prior_claims?: number;
 }): Promise<{ status: string; loan?: MonitoringLoan }> => {
   // auditor_name은 백엔드가 토큰의 사용자로부터 도출
   const { data } = await apiClient.post('/api/monitoring', loanData);
+  return data;
+};
+
+export const reevaluateAllMonitoring = async (): Promise<MonitoringResponse> => {
+  const { data } = await apiClient.post<MonitoringResponse>('/api/monitoring/reevaluate-all');
   return data;
 };

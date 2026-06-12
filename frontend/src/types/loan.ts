@@ -300,11 +300,15 @@ export interface AnalysisResponse {
 // 모니터링 대출 항목
 export interface MonitoringLoan {
   loan_id: string;
+  application_id?: string | null;
   auditor_name: string;
   company_name: string;
   ceo_name?: string;
   property_address: string;
+  complex_id?: number | null;
+  area_id?: number | null;
   loan_amount: number;
+  prior_claims?: number;
   execution_date: string;
   execution_price: number;
   current_price: number;
@@ -313,6 +317,8 @@ export interface MonitoringLoan {
   ltv_change: number;
   signal: string;
   signal_label: string;
+  last_evaluated_at?: string | null;
+  reevaluable?: boolean;
 }
 
 // 모니터링 요약

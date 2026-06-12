@@ -43,24 +43,77 @@ def add_loan(
     property_address: str,
     loan_amount: int,
     execution_price: int,
+    application_id: str | None = None,
+    complex_id: int | None = None,
+    area_id: int | None = None,
+    prior_claims: int = 0,
     execution_date: date | None = None,
 ) -> MonitoringLoan:
     loan = MonitoringLoan(
         loan_code=_next_loan_code(db),
+        application_id=application_id,
         auditor_user_id=auditor.id,
         auditor_name=auditor.ceo_name or auditor.user_id,
         company_name=company_name,
         ceo_name=ceo_name,
         property_address=property_address,
+        complex_id=complex_id,
+        area_id=area_id,
         loan_amount=loan_amount,
+        prior_claims=prior_claims,
         execution_date=execution_date or date.today(),
         execution_price=execution_price,
-        current_price=execution_price,  # 초기값 = 집행 시점 시세
+        current_price=execution_price,  # 초기값 = 집행 시점 시세, 재평가 전까지 동일
     )
     db.add(loan)
     db.commit()
     db.refresh(loan)
     return loan
+
+
+def reevaluate_loan(db: Session, loan: MonitoringLoan) -> bool:
+    """담보 단지의 최신 시세로 current_price 갱신. 단지 식별자(complex_id) 없으면 skip.
+
+    current_price = execution_price 와 동일 정의(KB 추정시세)로 잡아 LTV 변동이
+    '같은 자' 위에서 움직이게 한다. 시세 결측이면 명시적 skip(기존값 유지).
+    """
+    if not loan.complex_id:
+        return False
+    estimated = _latest_estimated_price(db, loan)
+    if not estimated:
+        return False
+    loan.current_price = estimated
+    loan.last_evaluated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(loan)
+    return True
+
+
+def reevaluate_all(db: Session) -> dict:
+    evaluated = skipped = 0
+    for loan in list_all(db):
+        if reevaluate_loan(db, loan):
+            evaluated += 1
+        else:
+            skipped += 1
+    return {"evaluated": evaluated, "skipped": skipped}
+
+
+def _latest_estimated_price(db: Session, loan: MonitoringLoan) -> int | None:
+    from core.config import settings as _cfg
+
+    if _cfg.internal_only:
+        from services.internal_market_service import get_internal_estimated_price
+        return get_internal_estimated_price(db, loan.complex_id, loan.area_id)
+
+    from services.real_data_service import get_real_market_data
+    md = get_real_market_data(
+        db, loan.property_address, complex_id=loan.complex_id, area_id=loan.area_id
+    )
+    cd = md.get("credit_data")
+    if not cd or not cd.kb_price or not cd.kb_price.estimated:
+        return None
+    return int(cd.kb_price.estimated)
 
 
 def get_summary(db: Session) -> dict:

@@ -282,6 +282,26 @@ def _build_ppp_from_cctr(
     )
 
 
+def get_internal_estimated_price(
+    db: Session,
+    complex_id: Optional[int],
+    area_id: Optional[int] = None,
+) -> Optional[int]:
+    """사후 모니터링 재평가용 경량 경로 — 최신 KB 추정시세만 (nearby/ppp/jb 빌드 생략)."""
+    if complex_id is None:
+        return None
+    complex_obj = db.query(Complex).filter(Complex.id == complex_id).first()
+    if not complex_obj or not complex_obj.kb_complex_id:
+        return None
+    pntp = None
+    if area_id is not None:
+        area_obj = db.query(Area).filter(Area.id == area_id, Area.complex_id == complex_obj.id).first()
+        pntp = area_obj.kb_area_code if area_obj else None
+    cutoff = date.today() - timedelta(days=HISTORY_DAYS)
+    kb = _build_kb_from_cctr(db, complex_obj.kb_complex_id, pntp, cutoff)
+    return int(kb.estimated) if kb and kb.estimated else None
+
+
 def get_internal_market_data(
     db: Session,
     complex_id: Optional[int] = None,

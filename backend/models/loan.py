@@ -175,11 +175,16 @@ class MonitoringLoan(Base):
     auditor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     auditor_name = Column(String(80), nullable=False, comment="집행 시점 심사역명 스냅샷")
 
+    application_id = Column(String(36), nullable=True, index=True, comment="원신청건 스냅샷 — 상세심사 박제 재현용(이력성, FK 미설정)")
     company_name = Column(String(200), nullable=False)
     ceo_name = Column(String(80), nullable=False)
     property_address = Column(String(500), nullable=False)
 
+    complex_id = Column(Integer, nullable=True, index=True, comment="complexes.id 스냅샷 — 시세 재평가용(ADR-002 FK 미설정)")
+    area_id = Column(Integer, nullable=True, comment="areas.id 스냅샷 — 평형")
+
     loan_amount = Column(BigInteger, nullable=False)
+    prior_claims = Column(BigInteger, nullable=False, default=0, comment="선순위 채권 합계(임차보증금+선순위근저당) 스냅샷")
     execution_date = Column(Date, nullable=False, index=True)
     execution_price = Column(BigInteger, nullable=False, comment="집행 시점 시세")
     current_price = Column(BigInteger, nullable=False, comment="최신 추정 시세")
@@ -191,16 +196,21 @@ class MonitoringLoan(Base):
     auditor = relationship("User", foreign_keys=[auditor_user_id])
 
     @property
+    def _exposure(self) -> int:
+        """LTV 분자 = 선순위 채권 + 당사 대출금 (신청/심사 LTV 와 동일 기준)."""
+        return (self.prior_claims or 0) + self.loan_amount
+
+    @property
     def execution_ltv(self) -> float:
         if not self.execution_price:
             return 0.0
-        return round(self.loan_amount / self.execution_price * 100, 1)
+        return round(self._exposure / self.execution_price * 100, 1)
 
     @property
     def current_ltv(self) -> float:
         if not self.current_price:
             return 0.0
-        return round(self.loan_amount / self.current_price * 100, 1)
+        return round(self._exposure / self.current_price * 100, 1)
 
     @property
     def ltv_change(self) -> float:
@@ -222,11 +232,15 @@ class MonitoringLoan(Base):
     def to_dict(self) -> dict:
         return {
             "loan_id": self.loan_code,
+            "application_id": self.application_id,
             "auditor_name": self.auditor_name,
             "company_name": self.company_name,
             "ceo_name": self.ceo_name,
             "property_address": self.property_address,
+            "complex_id": self.complex_id,
+            "area_id": self.area_id,
             "loan_amount": self.loan_amount,
+            "prior_claims": self.prior_claims or 0,
             "execution_date": self.execution_date.strftime("%Y-%m-%d") if self.execution_date else None,
             "execution_price": self.execution_price,
             "current_price": self.current_price,
@@ -235,4 +249,6 @@ class MonitoringLoan(Base):
             "ltv_change": self.ltv_change,
             "signal": self.signal,
             "signal_label": self.signal_label,
+            "last_evaluated_at": self.last_evaluated_at.strftime("%Y-%m-%d %H:%M") if self.last_evaluated_at else None,
+            "reevaluable": self.complex_id is not None,
         }

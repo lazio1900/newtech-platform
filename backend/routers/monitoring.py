@@ -17,6 +17,10 @@ class MonitoringRegisterRequest(BaseModel):
     property_address: str = Field(..., min_length=1, max_length=500)
     loan_amount: int = Field(..., gt=0)
     execution_price: int = Field(..., gt=0)
+    application_id: str | None = Field(default=None, max_length=36)
+    complex_id: int | None = None
+    area_id: int | None = None
+    prior_claims: int = Field(default=0, ge=0)
 
 
 @router.get("")
@@ -56,5 +60,36 @@ def register_loan(
         property_address=request.property_address,
         loan_amount=request.loan_amount,
         execution_price=request.execution_price,
+        application_id=request.application_id,
+        complex_id=request.complex_id,
+        area_id=request.area_id,
+        prior_claims=request.prior_claims,
     )
     return {"status": "success", "loan": loan.to_dict()}
+
+
+@router.post("/reevaluate-all")
+def reevaluate_all_loans(
+    user: User = Depends(require_role(UserRole.AUDITOR, UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    result = monitoring_service.reevaluate_all(db)
+    return {
+        "status": "success",
+        **result,
+        "loans": [l.to_dict() for l in monitoring_service.list_all(db)],
+        "summary": monitoring_service.get_summary(db),
+    }
+
+
+@router.post("/{loan_code}/reevaluate")
+def reevaluate_loan(
+    loan_code: str,
+    user: User = Depends(require_role(UserRole.AUDITOR, UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    loan = monitoring_service.get_by_loan_code(db, loan_code)
+    if not loan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="대출건을 찾을 수 없습니다.")
+    updated = monitoring_service.reevaluate_loan(db, loan)
+    return {"status": "success", "updated": updated, "loan": loan.to_dict()}

@@ -1,21 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { analyzeProperty } from '@/api/analysis';
-import { getMonitoringLoans } from '@/api/monitoring';
-import BorrowerInfo from './BorrowerInfo';
-import GuarantorInfo from './GuarantorInfo';
-import PropertyBasicInfo from './PropertyBasicInfo';
-import PropertyRightsInfo from './PropertyRightsInfo';
-import CreditSources from './CreditSources';
-import PriceCharts from './PriceCharts';
-import AIPropertyAnalysis from './AIPropertyAnalysis';
-import AIRightsAnalysis from './AIRightsAnalysis';
-import AIMarketAnalysis from './AIMarketAnalysis';
+import { getMonitoringLoans, reevaluateAllMonitoring } from '@/api/monitoring';
+import AnalysisDetail from './AnalysisDetail';
 import type { MonitoringLoan, MonitoringSummary, AnalysisResponse } from '@/types/loan';
 import './MonitoringTab.css';
 
 export default function MonitoringTab() {
   const [loans, setLoans] = useState<MonitoringLoan[]>([]);
-  const [summary, setSummary] = useState<MonitoringSummary | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [reevaluating, setReevaluating] = useState<boolean>(false);
   const [selectedLoan, setSelectedLoan] = useState<MonitoringLoan | null>(null);
   const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
   const [detailData, setDetailData] = useState<AnalysisResponse | null>(null);
@@ -31,18 +24,44 @@ export default function MonitoringTab() {
   const [filterSignal, setFilterSignal] = useState<string>('');
 
   useEffect(() => {
-    fetchMonitoring();
+    void initLoad();
   }, []);
 
-  const fetchMonitoring = async () => {
+  // 진입 시 최신 시세로 재평가 후 표시 (현재 LTV/신호등이 실시간 반영되도록)
+  const initLoad = async () => {
+    setLoading(true);
     try {
-      const data = await getMonitoringLoans();
+      const data = await reevaluateAllMonitoring();
       setLoans(data.loans);
-      setSummary(data.summary);
     } catch (err) {
-      console.error('Failed to fetch monitoring data:', err);
+      console.error('재평가 실패, 일반 조회로 대체:', err);
+      try {
+        const d = await getMonitoringLoans();
+        setLoans(d.loans);
+      } catch (e) {
+        console.error('Failed to fetch monitoring data:', e);
+      }
+    } finally {
+      setLoading(false);
     }
   };
+
+  const handleReevaluate = async () => {
+    setReevaluating(true);
+    try {
+      const data = await reevaluateAllMonitoring();
+      setLoans(data.loans);
+    } catch (err) {
+      console.error('재평가 실패:', err);
+    } finally {
+      setReevaluating(false);
+    }
+  };
+
+  const lastEvaluated = useMemo(() => {
+    const stamps = loans.map(l => l.last_evaluated_at).filter(Boolean) as string[];
+    return stamps.length ? stamps.sort().slice(-1)[0] : null;
+  }, [loans]);
 
   // 필터 옵션 추출
   const auditorOptions = useMemo(() =>
@@ -53,6 +72,32 @@ export default function MonitoringTab() {
     [...new Set(loans.map(l => l.company_name))].sort(),
     [loans]
   );
+
+  // 필터만 적용 (요약 카드 재계산 입력 — 정렬과 무관)
+  const filteredLoans = useMemo(() => {
+    let result = loans;
+    if (filterAuditor) result = result.filter(l => l.auditor_name === filterAuditor);
+    if (filterCompany) result = result.filter(l => l.company_name === filterCompany);
+    if (filterSignal) result = result.filter(l => l.signal === filterSignal);
+    return result;
+  }, [loans, filterAuditor, filterCompany, filterSignal]);
+
+  // 상단 요약 — 필터 적용된 행 기준으로 재계산
+  const summary: MonitoringSummary = useMemo(() => {
+    const rows = filteredLoans;
+    const total = rows.length;
+    const avg = total
+      ? Math.round((rows.reduce((s, r) => s + r.current_ltv, 0) / total) * 10) / 10
+      : 0;
+    return {
+      total_count: total,
+      green_count: rows.filter(r => r.signal === 'green').length,
+      yellow_count: rows.filter(r => r.signal === 'yellow').length,
+      red_count: rows.filter(r => r.signal === 'red').length,
+      total_amount: rows.reduce((s, r) => s + r.loan_amount, 0),
+      avg_current_ltv: avg,
+    };
+  }, [filteredLoans]);
 
   // 정렬 핸들러
   const handleSort = (key: string) => {
@@ -69,16 +114,9 @@ export default function MonitoringTab() {
     return <span className="sort-icon active">{sortDir === 'asc' ? '▲' : '▼'}</span>;
   };
 
-  // 필터 + 정렬 적용
+  // 정렬 적용
   const processedLoans = useMemo(() => {
-    let result = [...loans];
-
-    // 필터
-    if (filterAuditor) result = result.filter(l => l.auditor_name === filterAuditor);
-    if (filterCompany) result = result.filter(l => l.company_name === filterCompany);
-    if (filterSignal) result = result.filter(l => l.signal === filterSignal);
-
-    // 정렬
+    const result = [...filteredLoans];
     if (sortKey) {
       result.sort((a, b) => {
         let aVal = (a as unknown as Record<string, unknown>)[sortKey];
@@ -92,9 +130,8 @@ export default function MonitoringTab() {
         return 0;
       });
     }
-
     return result;
-  }, [loans, filterAuditor, filterCompany, filterSignal, sortKey, sortDir]);
+  }, [filteredLoans, sortKey, sortDir]);
 
   const hasActiveFilters = filterAuditor || filterCompany || filterSignal;
 
@@ -111,10 +148,16 @@ export default function MonitoringTab() {
     setDetailData(null);
 
     try {
+      // application_id 가 있으면 백엔드가 당시 심사 박제(스냅샷)를 그대로 반환
       const response = await analyzeProperty(
         loan.company_name,
         loan.property_address,
-        loan.loan_amount
+        loan.loan_amount,
+        {
+          applicationId: loan.application_id ?? undefined,
+          complexId: loan.complex_id ?? null,
+          areaId: loan.area_id ?? null,
+        }
       );
       setDetailData(response);
     } catch (err) {
@@ -169,52 +212,57 @@ export default function MonitoringTab() {
 
   const getLtvChangeDisplay = (change: number): string => {
     if (change > 0) return `+${change}%p`;
-    if (change < 0) return `${change}%p`;
     return `${change}%p`;
   };
 
   return (
     <div className="monitoring-tab">
-      {/* 요약 카드 */}
-      {summary && (
-        <div className="monitoring-summary">
-          <div className="summary-card total">
-            <span className="summary-label">총 관리 건수</span>
-            <span className="summary-value">{summary.total_count}건</span>
-          </div>
-          <div className="summary-card green">
-            <span className="summary-label">안전</span>
-            <span className="summary-value">{summary.green_count}건</span>
-          </div>
-          <div className="summary-card yellow">
-            <span className="summary-label">주의</span>
-            <span className="summary-value">{summary.yellow_count}건</span>
-          </div>
-          <div className="summary-card red">
-            <span className="summary-label">위험</span>
-            <span className="summary-value">{summary.red_count}건</span>
-          </div>
-          <div className="summary-card amount">
-            <span className="summary-label">총 대출 잔액</span>
-            <span className="summary-value">{formatAmount(summary.total_amount)}</span>
-          </div>
-          <div className="summary-card ltv">
-            <span className="summary-label">평균 현재 LTV</span>
-            <span className="summary-value">{summary.avg_current_ltv}%</span>
-          </div>
+      {/* 요약 카드 — 필터 반영 */}
+      <div className="monitoring-summary">
+        <div className="summary-card total">
+          <span className="summary-label">총 관리 건수</span>
+          <span className="summary-value">{summary.total_count}건</span>
         </div>
-      )}
+        <div className="summary-card green">
+          <span className="summary-label">안전</span>
+          <span className="summary-value">{summary.green_count}건</span>
+        </div>
+        <div className="summary-card yellow">
+          <span className="summary-label">주의</span>
+          <span className="summary-value">{summary.yellow_count}건</span>
+        </div>
+        <div className="summary-card red">
+          <span className="summary-label">위험</span>
+          <span className="summary-value">{summary.red_count}건</span>
+        </div>
+        <div className="summary-card amount">
+          <span className="summary-label">총 대출 잔액</span>
+          <span className="summary-value">{formatAmount(summary.total_amount)}</span>
+        </div>
+        <div className="summary-card ltv">
+          <span className="summary-label">평균 현재 LTV</span>
+          <span className="summary-value">{summary.avg_current_ltv}%</span>
+        </div>
+      </div>
 
       {/* 대출 목록 테이블 */}
       <div className="monitoring-table-card">
         <div className="monitoring-table-header">
           <h2>취급 대출 사후모니터링</h2>
-          <span className="monitoring-count">
-            {hasActiveFilters
-              ? `${processedLoans.length} / ${loans.length}건`
-              : `${loans.length}건`
-            }
-          </span>
+          <div className="monitoring-header-right">
+            {lastEvaluated && (
+              <span className="monitoring-last-eval">최근 재평가 {lastEvaluated}</span>
+            )}
+            <button className="reevaluate-btn" onClick={handleReevaluate} disabled={reevaluating || loading}>
+              {reevaluating ? '재평가 중…' : '시세 재평가'}
+            </button>
+            <span className="monitoring-count">
+              {hasActiveFilters
+                ? `${processedLoans.length} / ${loans.length}건`
+                : `${loans.length}건`
+              }
+            </span>
+          </div>
         </div>
 
         {/* 필터 바 */}
@@ -290,17 +338,18 @@ export default function MonitoringTab() {
             {processedLoans.length === 0 ? (
               <tr>
                 <td colSpan={10} className="empty-table-text">
-                  {hasActiveFilters ? '필터 조건에 해당하는 데이터가 없습니다.' : '데이터가 없습니다.'}
+                  {loading ? '불러오는 중입니다…' : hasActiveFilters ? '필터 조건에 해당하는 데이터가 없습니다.' : '데이터가 없습니다.'}
                 </td>
               </tr>
             ) : (
               processedLoans.map((loan) => (
-                <tr
-                  key={loan.loan_id}
-                  className="clickable-row"
-                  onClick={() => handleLoanClick(loan)}
-                >
-                  <td className="loan-id-cell">{loan.loan_id}</td>
+                <tr key={loan.loan_id}>
+                  <td className="loan-id-cell">
+                    <button className="loan-id-link" onClick={() => handleLoanClick(loan)}>
+                      {loan.loan_id}
+                    </button>
+                    {loan.reevaluable === false && <span className="loan-unlinked" title="원신청건 미연동 — 시세 재평가 불가">미연동</span>}
+                  </td>
                   <td>{loan.auditor_name}</td>
                   <td>{loan.company_name}</td>
                   <td className="address-cell">{loan.property_address}</td>
@@ -324,7 +373,7 @@ export default function MonitoringTab() {
         </table>
       </div>
 
-      {/* 상세 조회 팝업 */}
+      {/* 상세심사 팝업 — 신청목록>상세심사와 동일 분석 화면 */}
       {showDetailModal && selectedLoan && (
         <div className="monitoring-modal-overlay" onClick={closeModal}>
           <div className="monitoring-modal" onClick={(e) => e.stopPropagation()}>
@@ -386,36 +435,7 @@ export default function MonitoringTab() {
 
               {detailData && !detailLoading && (
                 <div className="content-layout">
-                  <div className="layout-row">
-                    <PropertyBasicInfo data={detailData.property_basic_info} />
-                    <AIPropertyAnalysis analysis={detailData.ai_analysis.property_analysis} />
-                  </div>
-                  <div className="layout-row">
-                    <BorrowerInfo data={detailData.borrower_info} />
-                    <GuarantorInfo data={detailData.guarantor_info} />
-                  </div>
-                  <div className="layout-row">
-                    <PropertyRightsInfo
-                      data={detailData.property_rights_info}
-                    />
-                    <AIRightsAnalysis analysis={detailData.ai_analysis.rights_analysis} />
-                  </div>
-                  {detailData.credit_data ? (
-                    <>
-                      <div className="layout-row">
-                        <CreditSources data={detailData.credit_data} />
-                        <PriceCharts data={detailData.credit_data} />
-                      </div>
-                      <div className="layout-row-full">
-                        <AIMarketAnalysis
-                          analysis={detailData.ai_analysis.market_analysis}
-                          jbDetail={detailData.credit_data.jb_detail}
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="card daf-unavailable">시세 확인 불가 — 내부형식(CCTR_*)에 이 단지 시세 데이터가 없습니다.</div>
-                  )}
+                  <AnalysisDetail data={detailData} loanAmount={selectedLoan.loan_amount} />
                 </div>
               )}
             </div>
