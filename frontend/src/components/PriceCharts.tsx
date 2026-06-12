@@ -299,7 +299,7 @@ export default function PriceCharts({ data }: PriceChartsProps) {
         <div className="jb-chart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <h4>JB 적정 시세 추이 · 3개월 예측</h4>
           <div style={{ fontSize: 11, color: '#666' }}>
-            <span style={{ marginRight: 8, color: '#444', fontWeight: 600 }}>수행달 가중치</span>
+            <span style={{ marginRight: 8, color: '#444', fontWeight: 600 }}>신청월 가중치</span>
             <span style={{ marginRight: 12 }}>KB <strong style={{ color: '#006FBD' }}>{Math.round((jbWeights.kb || 0) * 100)}%</strong></span>
             <span style={{ marginRight: 12 }}>실거래 <strong style={{ color: '#7DCCE5' }}>{Math.round((jbWeights.molit || 0) * 100)}%</strong></span>
             <span>현재 <strong style={{ color: '#FF8C00' }}>{formatPrice(latestJbPrice)}</strong></span>

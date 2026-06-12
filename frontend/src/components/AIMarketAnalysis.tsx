@@ -28,7 +28,7 @@ function JBBreakdown({ detail }: { detail: JBFairPriceDetail }) {
       <summary>JB 적정시세 · 예측 산출 근거 보기</summary>
       <div className="jb-breakdown-body">
         <section>
-          <h4>JB 적정시세 — 수행달 가중치</h4>
+          <h4>JB 적정시세 — 신청월 가중치</h4>
           <p className="jb-formula">
             JB = KB×<b>{formatPct(detail.weights.kb, 0)}</b> + 실거래×
             <b>{formatPct(detail.weights.molit, 0)}</b> ={' '}
@@ -63,11 +63,11 @@ function JBBreakdown({ detail }: { detail: JBFairPriceDetail }) {
           )}
           <p className="jb-method-hint">
             ※ 산출식: JB = (그 달 KB 평균)·40% + (그 달 실거래 IQR-평균)·60%.
-            수행달에 실거래 표본이 없으면 KB 단독(100%) 폴백.
+            신청월에 실거래 표본이 없으면 KB 단독(100%) 폴백.
             <br />
             ※ 월 대표값 계산: KB 는 그 달 스냅샷의 산술평균, 실거래는 그 달 표본에서 IQR(1.5×) 이상치 제거 후 평균.
             <br />
-            ※ 위 표의 가중치는 항상 "수행달" 의 가용 데이터 기준으로 표기됩니다.
+            ※ 위 표의 가중치는 항상 "신청월" 의 가용 데이터 기준으로 표기됩니다.
           </p>
         </section>
 

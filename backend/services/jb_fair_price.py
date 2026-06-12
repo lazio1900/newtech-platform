@@ -195,8 +195,8 @@ def compute_latest_jb(series: List[MonthlyAggregate]) -> Optional[JBComputeResul
             continue
         w = pt.weights
         notes = [
-            f"수행달 {agg.year}-{agg.month:02d}",
-            f"수행달 가중치: KB {w['kb']*100:.0f}% / 실거래 {w['molit']*100:.0f}%",
+            f"신청월 {agg.year}-{agg.month:02d}",
+            f"신청월 가중치: KB {w['kb']*100:.0f}% / 실거래 {w['molit']*100:.0f}%",
         ]
         if agg.kb:
             notes.append(f"KB {agg.kb_sample_count}건 평균 {agg.kb:,}원")
