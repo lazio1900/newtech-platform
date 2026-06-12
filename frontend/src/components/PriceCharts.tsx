@@ -146,8 +146,8 @@ export default function PriceCharts({ data }: PriceChartsProps) {
   const latestJbPrice = data.jb_fair_price || jbHistoryData[jbHistoryData.length - 1]?.price || 0;
   const jbWeights = data.jb_detail?.weights || { kb: 0.4, molit: 0.6, naver: 0.0 };
 
-  // JB 차트 데이터 — 실측(history) + 예측(forecast 향후 3개월만). 6개월 윈도우.
-  const forecastSrc = (data.jb_detail?.forecast || []).slice(0, 4);  // m=0..3
+  // JB 차트 데이터 — 실측(history) + 예측(forecast 향후 12개월).
+  const forecastSrc = (data.jb_detail?.forecast || []).slice(0, 13);  // m=0..12
   const jbCombined: Array<{
     ts: number;
     date: string;
@@ -173,9 +173,9 @@ export default function PriceCharts({ data }: PriceChartsProps) {
   }
   jbCombined.sort((a, b) => a.ts - b.ts);
 
-  // JB 차트 X축 — 과거 3개월 ~ 미래 3개월 (총 6개월)
+  // JB 차트 X축 — 과거 6개월 ~ 미래 12개월. 눈금 과밀 방지로 2개월 간격.
   const jbEndDate = new Date(_today);
-  jbEndDate.setMonth(jbEndDate.getMonth() + 3);
+  jbEndDate.setMonth(jbEndDate.getMonth() + 12);
   const jbEndTs = jbEndDate.getTime();
   const jbXTicks: number[] = [];
   {
@@ -183,7 +183,7 @@ export default function PriceCharts({ data }: PriceChartsProps) {
     t.setDate(1);
     while (t.getTime() <= jbEndTs) {
       if (t.getTime() >= startTs) jbXTicks.push(t.getTime());
-      t.setMonth(t.getMonth() + 1);
+      t.setMonth(t.getMonth() + 2);
     }
     if (!jbXTicks.includes(endTs)) jbXTicks.push(endTs);
   }
@@ -294,10 +294,10 @@ export default function PriceCharts({ data }: PriceChartsProps) {
 
       </div>
 
-      {/* JB 적정시세 추이 + 향후 3개월 예측 (1단계: 동적 가중치 + IQR + 80% 신뢰구간) */}
+      {/* JB 적정시세 추이 + 향후 12개월 예측 (동적 가중치 + IQR + 80% 신뢰구간) */}
       <div className="chart-box jb-fair-price-chart">
         <div className="jb-chart-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <h4>JB 적정 시세 추이 · 3개월 예측</h4>
+          <h4>JB 적정 시세 추이 · 12개월 예측</h4>
           <div style={{ fontSize: 11, color: '#666' }}>
             <span style={{ marginRight: 8, color: '#444', fontWeight: 600 }}>신청월 가중치</span>
             <span style={{ marginRight: 12 }}>KB <strong style={{ color: '#006FBD' }}>{Math.round((jbWeights.kb || 0) * 100)}%</strong></span>
@@ -325,7 +325,7 @@ export default function PriceCharts({ data }: PriceChartsProps) {
               fontSize: 11, color: '#555', marginTop: 4, marginBottom: 6,
               display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center',
             }}>
-              <span>3개월 후 예상</span>
+              <span>12개월 후 예상</span>
               <span>중심선 <strong style={{ color }}>{pct(rCenter)} ({fmtSigned(dCenter)})</strong></span>
               <span style={{ color: '#888' }}>
                 80% 범위 <strong>{pct(dLower / latestJbPrice)} ~ {pct(dUpper / latestJbPrice)}</strong>
