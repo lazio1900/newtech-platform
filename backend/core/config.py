@@ -79,6 +79,16 @@ class Settings(BaseSettings):
     mineru_api_url: str = "http://localhost:8200"
     mineru_request_timeout: int = 300
 
+    # ----- Keycloak / OIDC (사내망 SSO, 환경별 .env 주입) -----
+    # 개인PC/클라우드는 미설정(빈 값) → env-check 가 'ok:false 미설정'으로 표시.
+    # 운영 폐쇄망에서만 .env 로 issuer/realm/client 주입. 소스는 동일.
+    keycloak_issuer: str = ""        # 예: https://kc.internal/realms/jbwr
+    keycloak_realm: str = ""
+    keycloak_client_id: str = ""
+    keycloak_jwks_url: str = ""      # 비면 issuer + /protocol/openid-connect/certs 로 파생
+    oidc_employee_claim: str = "employee_number"  # 사번 클레임명
+    oidc_roles_claim: str = "realm_access.roles"  # 역할 클레임 점표기 경로
+
     # ----- Logging / Observability -----
     log_level: str = "INFO"
     log_format: str = "json"

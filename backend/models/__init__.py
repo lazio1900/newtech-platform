@@ -17,6 +17,7 @@ from models.db_connection import DbConnection
 from models.oracle_etl_mapping import OracleEtlMapping
 from models.llm_connection import LlmConnection
 from models.llm_prompt import LlmPrompt
+from models.oidc_config import OidcConfig
 
 # 수집기 소유 (ADR-002: 본 앱은 read-only로 사용. ORM 매핑 유지)
 from models.complex import Complex, Area, PriorityLevel
@@ -52,6 +53,7 @@ __all__ = [
     "OracleEtlMapping",
     "LlmConnection",
     "LlmPrompt",
+    "OidcConfig",
     # 수집기 소유 (read-only)
     "Complex",
     "Area",

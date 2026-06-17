@@ -1,5 +1,5 @@
 /**
- * 관리자 패널 — 서브탭(사용자 / LLM 연결 / 프롬프트 / DB 연결 / 데이터 매핑 / 운영 전환).
+ * 관리자 패널 — 서브탭(사용자 / LLM 연결 / 프롬프트 / DB 연결 / 데이터 매핑 / 운영 전환 / 환경 연동 점검).
  */
 import { useState } from 'react';
 import AdminUsers from './AdminUsers';
@@ -9,9 +9,10 @@ import AdminDbConnections from './AdminDbConnections';
 import AdminDataMappings from './AdminDataMappings';
 import AdminOracleEtl from './AdminOracleEtl';
 import AdminMigrationCheck from './AdminMigrationCheck';
+import AdminEnvCheck from './AdminEnvCheck';
 import './AdminPanel.css';
 
-type SubTab = 'users' | 'llm' | 'prompts' | 'db' | 'data-mappings' | 'oracle-etl' | 'migration';
+type SubTab = 'users' | 'llm' | 'prompts' | 'db' | 'data-mappings' | 'oracle-etl' | 'migration' | 'env-check';
 
 export default function AdminPanel() {
   const [sub, setSub] = useState<SubTab>('users');
@@ -30,6 +31,7 @@ export default function AdminPanel() {
         <SubTabBtn label="데이터 매핑" active={sub === 'data-mappings'} onClick={() => setSub('data-mappings')} />
         <SubTabBtn label="Oracle ETL" active={sub === 'oracle-etl'} onClick={() => setSub('oracle-etl')} />
         <SubTabBtn label="운영 전환" active={sub === 'migration'} onClick={() => setSub('migration')} />
+        <SubTabBtn label="환경 연동 점검" active={sub === 'env-check'} onClick={() => setSub('env-check')} />
       </nav>
 
       <div className="admin-panel-body">
@@ -41,6 +43,9 @@ export default function AdminPanel() {
         {sub === 'oracle-etl' && <AdminOracleEtl />}
         {sub === 'migration' && (
           <AdminMigrationCheck onNavigate={(t) => setSub(t)} />
+        )}
+        {sub === 'env-check' && (
+          <AdminEnvCheck onNavigate={(t) => setSub(t)} />
         )}
       </div>
     </div>

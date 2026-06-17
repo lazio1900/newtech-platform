@@ -12,6 +12,7 @@ from core.config import assert_production_safe, settings
 from routers import (
     admin_data_mappings,
     admin_db,
+    admin_env_check,
     admin_migration,
     admin_oracle_etl,
     admin_llm,
@@ -69,6 +70,7 @@ app.include_router(admin_prompts.router, prefix="/api/admin/llm/prompts", tags=[
 app.include_router(admin_db.router,      prefix="/api/admin/db/connections", tags=["admin-db"])
 app.include_router(admin_data_mappings.router, prefix="/api/admin/data-mappings", tags=["admin-data-mappings"])
 app.include_router(admin_migration.router, prefix="/api/admin/migration", tags=["admin-migration"])
+app.include_router(admin_env_check.router, prefix="/api/admin/env-check", tags=["admin-env-check"])
 app.include_router(admin_oracle_etl.router, prefix="/api/admin/oracle-etl", tags=["admin-oracle-etl"])
 
 
