@@ -29,7 +29,7 @@ def list_loans(
     db: Session = Depends(get_db),
 ):
     return {
-        "loans": [l.to_dict() for l in monitoring_service.list_all(db)],
+        "loans": monitoring_service.list_loan_dicts(db),
         "summary": monitoring_service.get_summary(db),
     }
 
@@ -40,6 +40,12 @@ def get_loan(
     user: User = Depends(require_role(UserRole.AUDITOR, UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ):
+    from core.config import settings as _cfg
+    if _cfg.internal_only:
+        row = next((r for r in monitoring_service.list_loan_dicts(db) if r["loan_id"] == loan_code), None)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="대출건을 찾을 수 없습니다.")
+        return row
     loan = monitoring_service.get_by_loan_code(db, loan_code)
     if not loan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="대출건을 찾을 수 없습니다.")
@@ -77,7 +83,7 @@ def reevaluate_all_loans(
     return {
         "status": "success",
         **result,
-        "loans": [l.to_dict() for l in monitoring_service.list_all(db)],
+        "loans": monitoring_service.list_loan_dicts(db),
         "summary": monitoring_service.get_summary(db),
     }
 

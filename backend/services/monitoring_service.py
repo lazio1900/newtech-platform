@@ -18,6 +18,16 @@ def list_all(db: Session) -> list[MonitoringLoan]:
     )
 
 
+def list_loan_dicts(db: Session) -> list[dict]:
+    """라우터용 행 목록. internal_only 면 정보계 6테이블에서, 아니면 app monitoring_loans."""
+    from core.config import settings as _cfg
+
+    if _cfg.internal_only:
+        from services.internal_monitoring_service import list_internal_monitoring
+        return list_internal_monitoring(db)
+    return [l.to_dict() for l in list_all(db)]
+
+
 def get_by_loan_code(db: Session, loan_code: str) -> Optional[MonitoringLoan]:
     return db.query(MonitoringLoan).filter(MonitoringLoan.loan_code == loan_code).first()
 
@@ -90,6 +100,11 @@ def reevaluate_loan(db: Session, loan: MonitoringLoan) -> bool:
 
 
 def reevaluate_all(db: Session) -> dict:
+    from core.config import settings as _cfg
+
+    if _cfg.internal_only:
+        # 정보계는 read-only — current_price 는 조회 시점에 계산되므로 쓰기 재평가 없음
+        return {"evaluated": 0, "skipped": 0}
     evaluated = skipped = 0
     for loan in list_all(db):
         if reevaluate_loan(db, loan):
@@ -117,6 +132,11 @@ def _latest_estimated_price(db: Session, loan: MonitoringLoan) -> int | None:
 
 
 def get_summary(db: Session) -> dict:
+    from core.config import settings as _cfg
+
+    if _cfg.internal_only:
+        from services.internal_monitoring_service import list_internal_monitoring, summary_from_rows
+        return summary_from_rows(list_internal_monitoring(db))
     loans = list_all(db)
     total = len(loans)
     if total == 0:
